@@ -21,11 +21,11 @@ import (
 	"github.com/zenoss/serviced/volume"
 	_ "github.com/zenoss/serviced/volume/btrfs"
 	_ "github.com/zenoss/serviced/volume/rsync"
+	_ "github.com/zenoss/serviced/volume/zfs"
 	"github.com/zenoss/serviced/web"
 
 	"flag"
 	"fmt"
-	"github.com/zenoss/glog"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -34,6 +34,7 @@ import (
 	"os/user"
 	"path"
 	"time"
+	"github.com/zenoss/glog"
 )
 
 // Store the command line options

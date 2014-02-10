@@ -28,6 +28,7 @@ type ZfsDriver struct {
 
 type ZfsConn struct {
 	ZfsDriver
+	pool string
 	name string
 	root string
 }
@@ -71,24 +72,14 @@ func (d *ZfsDriver) Mount(volumeName, rootDir string) (volume.Conn, error) {
 		glog.Errorf("ZFS error: %v", err)
 		return nil, fmt.Errorf("ZFS error: %v", err)
 	case exists == false:
-		// create filesystem for volume
-	}
-
-	c := &ZfsConn{d, name: volumeName, root: rootDir}
-	return c, nil
-}
-
-func (d *ZfsDriver) volumeExists(v string) (bool, error) {
-	out, _ := exec.Command("sudo", "zfs", "list").CombinedOutput()
-	scanner := bufio.NewScanner(bytes.NewBuffer(out))
-	for scanner.Scan() {
-		matched, _ := regexp.MatchString(v, scanner.Text())
-		if matched {
-			return true
+		if _, err = runcmd(d.sudoer, "create", "-o", fmt.Sprintf("mountpoint=%s", v), fmt.Sprintf("zenpool/%s", volumeName)); err != nil {
+			glog.Errorf("Could not create filesystem for: %s", v)
+			return nil, fmt.Errorf("Could no create filesystem for: %s (%v)", v, err)
 		}
 	}
 
-	return false
+	c := &ZfsConn{*d, fmt.Sprintf("zenpool/%s", volumeName), volumeName, rootDir}
+	return c, nil
 }
 
 func (c *ZfsConn) Name() string {
@@ -100,17 +91,55 @@ func (c *ZfsConn) Path() string {
 }
 
 func (c *ZfsConn) Snapshot(label string) error {
-	return fmt.Errorf("TBI")
+	_, err := runcmd(c.sudoer, "zfs", "snapshot", fmt.Sprintf("%s@%s", c.pool, label))
+	return err
 }
 
 func (c *ZfsConn) Snapshots() ([]string, error) {
-	return []string{}, fmt.Errorf("TBI")
+	cmdout, err := exec.Command("sudo", "ls", path.Join(c.Path(), ".zfs", "snapshot")).CombinedOutput()
+	if err != nil {
+		errmsg := fmt.Errorf("Can't open snapshots directory: %v", err)
+		glog.Errorf("%v", errmsg)
+		return []string{}, errmsg
+	}
+
+	scanner := bufio.NewScanner(bytes.NewBuffer(cmdout))
+	snaps := []string{}
+	for scanner.Scan() {
+		snaps = append(snaps, scanner.Text())
+	}
+
+	return snaps, nil
 }
 
-func (c *ZfsConn) RemoveSnapshot(lable string) error {
-	return fmt.Errorf("TBI")
+func (c *ZfsConn) RemoveSnapshot(label string) error {
+	_, err := runcmd(c.sudoer, "zfs", "destroy", fmt.Sprintf("%s@%s", c.pool, label))
+	return err
 }
 
-func (c *ZfsConn) Rollback(lable string) error {
-	return fmt.Errorf("TBI")
+func (c *ZfsConn) Rollback(label string) error {
+	_, err := runcmd(c.sudoer, "zfs", "rollback", fmt.Sprintf("%s@%s", c.pool, label))
+	return err
+}
+
+func runcmd(sudoer bool, args ...string) ([]byte, error) {
+	cmd := append([]string{"zfs"}, args...)
+	if sudoer {
+		cmd = append([]string{"sudo", "-n"}, cmd...)
+	}
+	glog.V(4).Infof("Executing: %v", cmd)
+	return exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
+}
+
+func (d *ZfsDriver) volumeExists(v string) (bool, error) {
+	out, _ := exec.Command("sudo", "zfs", "list").CombinedOutput()
+	scanner := bufio.NewScanner(bytes.NewBuffer(out))
+	for scanner.Scan() {
+		matched, _ := regexp.MatchString(v, scanner.Text())
+		if matched {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
