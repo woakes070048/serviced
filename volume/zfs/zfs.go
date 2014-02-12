@@ -51,7 +51,7 @@ func New() (*ZfsDriver, error) {
 
 	result := &ZfsDriver{}
 	if user.Uid != "0" {
-		err := exec.Command("sudo", "-n", "zfs", "help").Run()
+		err := exec.Command("sudo", "-n", "zfs", "list").Run()
 		result.sudoer = err == nil
 	}
 
