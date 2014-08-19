@@ -17,6 +17,7 @@ import (
 	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/datastore"
 	"github.com/control-center/serviced/domain/service"
+	"github.com/control-center/serviced/domain/servicedefinition"
 )
 
 // AddService add a service. Return error if service already exists
@@ -97,6 +98,16 @@ func (this *ControlPlaneDao) GetTenantId(serviceID string, tenantId *string) err
 // Get a service endpoint.
 func (this *ControlPlaneDao) GetServiceEndpoints(serviceID string, response *map[string][]*dao.ApplicationEndpoint) (err error) {
 	if result, err := this.facade.GetServiceEndpoints(datastore.Get(), serviceID); err == nil {
+		*response = result
+		return nil
+	} else {
+		return err
+	}
+}
+
+// Get the service config history
+func (this *ControlPlaneDao) ServiceConfigHistory(serviceID string, response *[]*servicedefinition.ConfigFile) (err error) {
+	if result, err := this.facade.ServiceConfigHistory(datastore.Get(), serviceID); err == nil {
 		*response = result
 		return nil
 	} else {

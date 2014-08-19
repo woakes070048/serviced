@@ -27,6 +27,7 @@ import (
 	"github.com/control-center/serviced/domain"
 	"github.com/control-center/serviced/domain/addressassignment"
 	"github.com/control-center/serviced/domain/service"
+	"github.com/control-center/serviced/domain/servicedefinition"
 	"github.com/control-center/serviced/domain/servicestate"
 	"github.com/control-center/serviced/domain/servicetemplate"
 	"github.com/control-center/serviced/domain/user"
@@ -143,6 +144,10 @@ func (s *ControlClient) GetRunningService(request dao.ServiceStateRequest, runni
 
 func (s *ControlClient) GetServiceStates(serviceId string, states *[]*servicestate.ServiceState) (err error) {
 	return s.rpcClient.Call("ControlPlane.GetServiceStates", serviceId, states)
+}
+
+func (s *ControlClient) ServiceConfigHistory(serviceId string, history *[]*servicedefinition.ConfigFile) (err error) {
+	return s.rpcClient.Call("ControlPlane.ServiceConfigHistory", serviceId, history)
 }
 
 func (s *ControlClient) StartService(serviceId string, hostId *string) (err error) {

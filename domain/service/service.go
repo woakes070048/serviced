@@ -42,7 +42,6 @@ type Service struct {
 	Startup           string
 	Description       string
 	Tags              []string
-	OriginalConfigs   map[string]servicedefinition.ConfigFile
 	ConfigFiles       map[string]servicedefinition.ConfigFile
 	Instances         int
 	InstanceLimits    domain.MinMax
@@ -139,7 +138,6 @@ func BuildService(sd servicedefinition.ServiceDefinition, parentServiceID string
 	svc.HostPolicy = sd.HostPolicy
 	svc.Hostname = sd.Hostname
 	svc.Privileged = sd.Privileged
-	svc.OriginalConfigs = sd.ConfigFiles
 	svc.ConfigFiles = sd.ConfigFiles
 	svc.Tasks = sd.Tasks
 	svc.ParentServiceID = parentServiceID

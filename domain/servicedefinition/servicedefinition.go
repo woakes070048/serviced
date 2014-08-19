@@ -96,10 +96,13 @@ type Volume struct {
 
 // ConfigFile config file for a service
 type ConfigFile struct {
-	Filename    string // complete path of file
-	Owner       string // owner of file within the container, root:root or 0:0 for root owned file, what you would pass to chown
-	Permissions string // permission of file, eg 0664, what you would pass to chmod
-	Content     string // content of config file
+	Filename    string    // complete path of file
+	Owner       string    // owner of file within the container, root:root or 0:0 for root owned file, what you would pass to chown
+	Permissions string    // permission of file, eg 0664, what you would pass to chmod
+	Content     string    // content of config file
+	Updated     time.Time // datetime which the configuration was updated
+	Deleted     bool      // indicates whether the config file is to be deleted
+	Commit      string    //optional string to describe the change made to the configuration
 }
 
 //AddressResourceConfig defines an external facing port for a service definition

@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,11 +52,13 @@ func (f *Facade) AddService(ctx datastore.Context, svc service.Service) error {
 		glog.V(2).Infof("Facade.AddService: %+v", err)
 		return err
 	}
-	glog.V(2).Infof("Facade.AddService: id %+v", svc.ID)
 
-	if svcCopy.OriginalConfigs != nil && !reflect.DeepEqual(svcCopy.OriginalConfigs, svc.ConfigFiles) {
-		for key, _ := range svcCopy.OriginalConfigs {
-			glog.V(2).Infof("Facade.AddService: calling updateService for %s due to OriginalConfigs of %+v", svc.Name, key)
+	glog.V(2).Infof("Facade.AddService: id %+v", svc.ID)
+	if svcCopy.ConfigFiles != nil {
+		for key, confFile := range svcCopy.ConfigFiles {
+			glog.V(2).Infof("Facade.AddService: calling updateService for %s due to OriginalConfigs of %+v", svcCopy.Name, key)
+			confFile.Commit = "initial revision"
+			svcCopy.ConfigFiles[key] = confFile
 		}
 		return f.updateService(ctx, &svcCopy)
 	}
@@ -726,15 +729,19 @@ func (f *Facade) fillServiceConfigs(ctx datastore.Context, svc *service.Service)
 		return err
 	}
 
+	glog.Infof("Getting config for service %s: %v", svc.Name, svc.ConfigFiles)
+
 	//found confs are the modified confs for f service
 	foundConfs := make(map[string]*servicedefinition.ConfigFile)
 	for _, svcConfig := range existingConfs {
-		foundConfs[svcConfig.ConfFile.Filename] = &svcConfig.ConfFile
+		if confFile, ok := foundConfs[svcConfig.ConfFile.Filename]; !ok || confFile.Updated.Before(svcConfig.ConfFile.Updated) {
+			foundConfs[svcConfig.ConfFile.Filename] = &svcConfig.ConfFile
+		}
 	}
 
 	//replace with stored service config only if it is an existing config
 	for name, conf := range foundConfs {
-		if _, found := svc.ConfigFiles[name]; found {
+		if !conf.Deleted {
 			svc.ConfigFiles[name] = *conf
 		}
 	}
@@ -776,12 +783,10 @@ func (f *Facade) updateService(ctx datastore.Context, svc *service.Service) erro
 	}
 
 	//Deal with Service Config Files
-	//For now always make sure originalConfigs stay the same, essentially they are immutable
-	svc.OriginalConfigs = oldSvc.OriginalConfigs
 
-	//check if config files haven't changed
-	if !reflect.DeepEqual(oldSvc.OriginalConfigs, svc.ConfigFiles) {
-		//lets validate Service before doing more work....
+	// check if config files haven't changed
+	if !reflect.DeepEqual(oldSvc.ConfigFiles, svc.ConfigFiles) {
+		// lets validate the service before doing more work
 		if err := svc.ValidEntity(); err != nil {
 			return err
 		}
@@ -791,42 +796,32 @@ func (f *Facade) updateService(ctx datastore.Context, svc *service.Service) erro
 			return err
 		}
 
-		newConfs := make(map[string]*serviceconfigfile.SvcConfigFile)
-		//config files are different, for each one that is different validate and add to newConfs
-		for key, oldConf := range oldSvc.OriginalConfigs {
-			if conf, found := svc.ConfigFiles[key]; found {
-				if !reflect.DeepEqual(oldConf, conf) {
-					newConf, err := serviceconfigfile.New(tenantID, servicePath, conf)
-					if err != nil {
-						return err
-					}
-					newConfs[key] = newConf
+		configStore := serviceconfigfile.NewStore()
+
+		oldConfigs := oldSvc.ConfigFiles
+		for key, conf := range svc.ConfigFiles {
+			if oldConf, found := oldConfigs[key]; found {
+				delete(oldConfigs, key)
+				if reflect.DeepEqual(oldConf, conf) {
+					continue
 				}
 			}
-		}
-
-		//Get current stored conf files and replace as needed
-		configStore := serviceconfigfile.NewStore()
-		existingConfs, err := configStore.GetConfigFiles(ctx, tenantID, servicePath)
-		if err != nil {
-			return err
-		}
-		foundConfs := make(map[string]*serviceconfigfile.SvcConfigFile)
-		for _, svcConfig := range existingConfs {
-			foundConfs[svcConfig.ConfFile.Filename] = svcConfig
-		}
-		//add or replace stored service config
-		for _, newConf := range newConfs {
-			if existing, found := foundConfs[newConf.ConfFile.Filename]; found {
-				newConf.ID = existing.ID
-				//delete it from stored confs, left overs will be deleted from DB
-				delete(foundConfs, newConf.ConfFile.Filename)
+			conf.Updated = time.Now()
+			newConf, err := serviceconfigfile.New(tenantID, servicePath, conf)
+			if err != nil {
+				return err
 			}
 			configStore.Put(ctx, serviceconfigfile.Key(newConf.ID), newConf)
 		}
-		//remove leftover non-updated stored confs, conf was probably reverted to original or no longer exists
-		for _, confToDelete := range foundConfs {
-			configStore.Delete(ctx, serviceconfigfile.Key(confToDelete.ID))
+		for _, conf := range oldConfigs {
+			conf.Content = ""
+			conf.Deleted = true
+			conf.Updated = time.Now()
+			newConf, err := serviceconfigfile.New(tenantID, servicePath, conf)
+			if err != nil {
+				return nil
+			}
+			configStore.Put(ctx, serviceconfigfile.Key(newConf.ID), newConf)
 		}
 	}
 
@@ -843,6 +838,43 @@ func (f *Facade) updateService(ctx datastore.Context, svc *service.Service) erro
 		err = zkAPI(f).updateService(svc)
 	}
 	return err
+}
+
+type history []*servicedefinition.ConfigFile
+
+func (h history) Len() int           { return len(h) }
+func (h history) Less(x, y int) bool { return h[x].Updated.Before(h[y].Updated) }
+func (h history) Swap(x, y int)      { h[x], h[y] = h[y], h[x] }
+
+// Acquires the history of configuration changes for a service and arranges
+// them in chronological order
+func (f *Facade) ServiceConfigHistory(ctx datastore.Context, serviceID string) ([]*servicedefinition.ConfigFile, error) {
+	svcStore := f.serviceStore
+	svc, err := svcStore.Get(ctx, serviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	tenantID, servicePath, err := f.getTenantIDAndPath(ctx, *svc)
+	if err != nil {
+		return nil, err
+	}
+
+	configStore := serviceconfigfile.NewStore()
+	configs, err := configStore.GetConfigFiles(ctx, tenantID, servicePath)
+	if err != nil {
+		return nil, err
+	}
+
+	confHistory := make([]*servicedefinition.ConfigFile, len(configs))
+	for i, config := range configs {
+		confFile := config.ConfFile
+		confHistory[i] = &confFile
+	}
+
+	// arrange in chronological order
+	sort.Sort(history(confHistory))
+	return confHistory, nil
 }
 
 func getZKAPI(f *Facade) zkfuncs {

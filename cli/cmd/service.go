@@ -195,6 +195,12 @@ func (c *ServicedCli) initService() {
 				Description:  "serviced service snapshot SERVICEID",
 				BashComplete: c.printServicesFirst,
 				Action:       c.cmdServiceSnapshot,
+			}, {
+				Name:         "history",
+				Usage:        "Loads the commit history of a service's config files",
+				Description:  "serviced service history SERVICEID [FILENAME] [--revert TIMESTAMP]",
+				BashComplete: c.printServicesFirst,
+				Action:       c.cmdServiceHistory,
 			},
 		},
 	})
@@ -1046,4 +1052,40 @@ func (c *ServicedCli) cmdServiceSnapshot(ctx *cli.Context) {
 	} else {
 		fmt.Println(snapshot)
 	}
+}
+
+// serviced service history SERVICEID [FILENAME] [--revert TIMESTAMP]
+func (c *ServicedCli) cmdServiceHistory(ctx *cli.Context) {
+	if len(ctx.Args()) < 1 {
+		fmt.Printf("Incorrect Usage.\n\n")
+		cli.ShowCommandHelp(ctx, "history")
+		return
+	}
+
+	svc, err := c.searchForService(ctx.Args().First())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
+	}
+
+	history, err := c.driver.ServiceConfigHistory(svc.ID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not get history for service: %s\n", err)
+		return
+	}
+
+	var filename string
+	if len(ctx.Args()) > 1 {
+		filename = ctx.Args()[1]
+	}
+
+	matches := newtable(0, 8, 2)
+	matches.printrow("ID", "DATE/TIME", "FILENAME", "DELETED", "COMMIT")
+	for i := len(history) - 1; i >= 0; i-- {
+		row := history[i]
+		if filename == "" || filename == row.Filename {
+			matches.printrow(row.Updated.Unix(), row.Updated, row.Filename, row.Deleted, row.Commit)
+		}
+	}
+	matches.flush()
 }

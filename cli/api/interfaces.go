@@ -20,6 +20,7 @@ import (
 	"github.com/control-center/serviced/domain/host"
 	"github.com/control-center/serviced/domain/pool"
 	"github.com/control-center/serviced/domain/service"
+	"github.com/control-center/serviced/domain/servicedefinition"
 	"github.com/control-center/serviced/domain/servicestate"
 	template "github.com/control-center/serviced/domain/servicetemplate"
 	"github.com/control-center/serviced/facade"
@@ -56,6 +57,7 @@ type API interface {
 	AddService(ServiceConfig) (*service.Service, error)
 	RemoveService(RemoveServiceConfig) error
 	UpdateService(io.Reader) (*service.Service, error)
+	ServiceConfigHistory(string) ([]*servicedefinition.ConfigFile, error)
 	StartService(string) error
 	StopService(string) error
 	AssignIP(IPConfig) error

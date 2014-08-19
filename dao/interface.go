@@ -17,6 +17,7 @@ import (
 	"github.com/control-center/serviced/domain"
 	"github.com/control-center/serviced/domain/addressassignment"
 	"github.com/control-center/serviced/domain/service"
+	"github.com/control-center/serviced/domain/servicedefinition"
 	"github.com/control-center/serviced/domain/servicestate"
 	"github.com/control-center/serviced/domain/servicetemplate"
 	"github.com/control-center/serviced/domain/user"
@@ -161,6 +162,9 @@ type ControlPlane interface {
 
 	//---------------------------------------------------------------------------
 	// Service CRUD
+
+	// Get service config history
+	ServiceConfigHistory(serviceID string, history *[]*servicedefinition.ConfigFile) error
 
 	// Rollback DFS and service image
 	Rollback(snapshotId string, unused *int) error

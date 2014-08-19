@@ -215,6 +215,21 @@ func (a *api) UpdateService(reader io.Reader) (*service.Service, error) {
 	return a.GetService(s.ID)
 }
 
+// ServiceConfigHistory gets the history of a service's configurations
+func (a *api) ServiceConfigHistory(serviceID string) ([]*servicedefinition.ConfigFile, error) {
+	client, err := a.connectDAO()
+	if err != nil {
+		return nil, err
+	}
+
+	var history []*servicedefinition.ConfigFile
+	if err := client.ServiceConfigHistory(serviceID, &history); err != nil {
+		return nil, err
+	}
+
+	return history, nil
+}
+
 // StartService starts a service
 func (a *api) StartService(id string) error {
 	client, err := a.connectDAO()
