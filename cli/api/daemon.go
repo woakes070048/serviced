@@ -57,7 +57,6 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
-	"net/rpc/jsonrpc"
 	"os"
 	"os/signal"
 	"path"
@@ -84,7 +83,6 @@ type daemon struct {
 	hostAgent        *node.HostAgent
 	shutdown         chan interface{}
 	waitGroup        *sync.WaitGroup
-	rpcServer        *rpc.Server
 }
 
 func newDaemon(servicedEndpoint string, staticIPs []string, masterPoolID string) (*daemon, error) {
@@ -94,9 +92,30 @@ func newDaemon(servicedEndpoint string, staticIPs []string, masterPoolID string)
 		masterPoolID:     masterPoolID,
 		shutdown:         make(chan interface{}),
 		waitGroup:        &sync.WaitGroup{},
-		rpcServer:        rpc.NewServer(),
 	}
 	return d, nil
+}
+
+func (d *daemon) getEsClusterName(Type string) string {
+
+	filename := path.Join(options.VarPath, "isvcs", Type+".clustername")
+	clusterName := ""
+	data, err := ioutil.ReadFile(filename)
+	if err != nil || len(data) <= 0 {
+		clusterName, err = utils.NewUUID36()
+		if err != nil {
+			glog.Fatalf("could not generate uuid: %s", err)
+		}
+		if err := os.MkdirAll(path.Dir(filename), 0770); err != nil {
+			glog.Fatalf("could not create dir %s: %s", path.Dir(filename), err)
+		}
+		if err := ioutil.WriteFile(filename, []byte(clusterName), 0600); err != nil {
+			glog.Fatalf("could not write clustername to %s: %s", filename, err)
+		}
+	} else {
+		clusterName = strings.TrimSpace(string(data))
+	}
+	return clusterName
 }
 
 func (d *daemon) run() error {
@@ -115,6 +134,12 @@ func (d *daemon) run() error {
 	//TODO: should this just be in startMaster
 	isvcs.Init()
 	isvcs.Mgr.SetVolumesDir(path.Join(options.VarPath, "isvcs"))
+	if err := isvcs.Mgr.SetConfigurationOption("elasticsearch-serviced", "cluster", d.getEsClusterName("elasticsearch-serviced")); err != nil {
+		glog.Fatalf("could not set es-serviced option: %s", err)
+	}
+	if err := isvcs.Mgr.SetConfigurationOption("elasticsearch-logstash", "cluster", d.getEsClusterName("elasticsearch-logstash")); err != nil {
+		glog.Fatalf("could not set es-logstash option: %s", err)
+	}
 
 	dockerVersion, err := node.GetDockerVersion()
 	if err != nil {
@@ -141,17 +166,13 @@ func (d *daemon) run() error {
 		}
 	}
 
-	d.rpcServer.HandleHTTP(rpc.DefaultRPCPath, rpc.DefaultDebugPath)
+	rpc.HandleHTTP()
 
 	glog.V(0).Infof("Listening on %s", l.Addr().String())
 	go func() {
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				glog.Fatalf("Error accepting connections: %s", err)
-			}
-			go d.rpcServer.ServeCodec(jsonrpc.NewServerCodec(conn))
-		}
+		// start the server
+		http.Serve(l, nil)
+		glog.Infof("http server done")
 	}()
 
 	signalChan := make(chan os.Signal, 10)
@@ -175,6 +196,8 @@ func (d *daemon) run() error {
 		glog.Info("Timed out waiting for shutdown")
 		//Return error???
 	}
+	// finally, close all connections to zookeeper
+	zzk.ShutdownConnections()
 	return nil
 }
 
@@ -261,7 +284,7 @@ func (d *daemon) startMaster() error {
 		go func() {
 			defer d.waitGroup.Done()
 			<-d.shutdown
-			glog.Infof("Shuttding down storage handler")
+			glog.Infof("Shutting down storage handler")
 			d.storageHandler.Close()
 		}()
 	}
@@ -454,7 +477,7 @@ func (d *daemon) startAgent() error {
 
 		// register the API
 		glog.V(0).Infoln("registering ControlPlaneAgent service")
-		if err = d.rpcServer.RegisterName("ControlPlaneAgent", hostAgent); err != nil {
+		if err = rpc.RegisterName("ControlPlaneAgent", hostAgent); err != nil {
 			glog.Fatalf("could not register ControlPlaneAgent RPC server: %v", err)
 		}
 
@@ -475,7 +498,7 @@ func (d *daemon) startAgent() error {
 	}()
 
 	glog.Infof("agent start staticips: %v [%d]", d.staticIPs, len(d.staticIPs))
-	if err = d.rpcServer.RegisterName("Agent", agent.NewServer(d.staticIPs)); err != nil {
+	if err = rpc.RegisterName("Agent", agent.NewServer(d.staticIPs)); err != nil {
 		glog.Fatalf("could not register Agent RPC server: %v", err)
 	}
 	if err != nil {
@@ -495,16 +518,16 @@ func (d *daemon) startAgent() error {
 func (d *daemon) registerMasterRPC() error {
 	glog.V(0).Infoln("registering Master RPC services")
 
-	if err := d.rpcServer.RegisterName("Master", master.NewServer(d.facade)); err != nil {
+	if err := rpc.RegisterName("Master", master.NewServer(d.facade)); err != nil {
 		return fmt.Errorf("could not register rpc server LoadBalancer: %v", err)
 	}
 
 	// register the deprecated rpc servers
-	if err := d.rpcServer.RegisterName("LoadBalancer", d.cpDao); err != nil {
+	if err := rpc.RegisterName("LoadBalancer", d.cpDao); err != nil {
 		return fmt.Errorf("could not register rpc server LoadBalancer: %v", err)
 	}
 
-	if err := d.rpcServer.RegisterName("ControlPlane", d.cpDao); err != nil {
+	if err := rpc.RegisterName("ControlPlane", d.cpDao); err != nil {
 		return fmt.Errorf("could not register rpc server LoadBalancer: %v", err)
 	}
 	return nil

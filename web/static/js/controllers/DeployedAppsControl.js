@@ -45,6 +45,7 @@ function DeployedAppsControl($scope, $routeParams, $location, $notification, res
 
     $scope.services = buildTable('poolID', [
         { id: 'Name', name: 'deployed_tbl_name'},
+        { id: 'Description', name: 'deployed_tbl_description'},
         { id: 'Health', name: 'health_check'},
         { id: 'Id', name: 'deployed_tbl_deployment_id'},
         { id: 'poolID', name: 'deployed_tbl_pool'},
@@ -105,10 +106,19 @@ function DeployedAppsControl($scope, $routeParams, $location, $notification, res
     // given a service application find all of it's virtual host names
     $scope.collect_vhosts = function( app) {
         var vhosts = [];
-        var vhosts_definitions = aggregateVhosts( app);
-        for ( var i in vhosts_definitions) {
-            vhosts.push( vhosts_definitions[i].Name);
+	
+        if (app.Endpoints) {
+            for (var i in app.Endpoints) {
+                var endpoint = app.Endpoints[i];
+                if (endpoint.VHosts) {
+                    for ( var j in endpoint.VHosts) {
+                        vhosts.push( endpoint.VHosts[j] );
+                    }
+                }
+            }
         }
+
+        vhosts.sort();
         return vhosts;
     };
 
@@ -121,7 +131,7 @@ function DeployedAppsControl($scope, $routeParams, $location, $notification, res
     $scope.clickRemoveService = function(app) {
         $scope.appToRemove = app;
         $modalService.create({
-            template: $translate("warning_remove_service"),
+            template: $translate.instant("warning_remove_service"),
             model: $scope,
             title: "remove_service",
             actions: [
@@ -168,7 +178,7 @@ function DeployedAppsControl($scope, $routeParams, $location, $notification, res
         var displayStatus = capitalizeFirst(status);
 
         $modalService.create({
-            template: $translate("confirm_"+ status +"_app"),
+            template: $translate.instant("confirm_"+ status +"_app"),
             model: $scope,
             title: displayStatus +" Services",
             actions: [
@@ -216,7 +226,7 @@ function DeployedAppsControl($scope, $routeParams, $location, $notification, res
 
     $scope.deleteTemplate = function(templateID){
         $modalService.create({
-            template: $translate("template_remove_confirm") + "<strong>"+ templateID +"</strong>",
+            template: $translate.instant("template_remove_confirm") + "<strong>"+ templateID +"</strong>",
             model: $scope,
             title: "template_remove",
             actions: [

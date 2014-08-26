@@ -23,9 +23,11 @@ import (
 	"github.com/zenoss/go-dockerclient"
 
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 )
 
 // managerOp is a type of manager operation (stop, start, notify)
@@ -92,7 +94,9 @@ func init() {
 
 // checks to see if the given repo:tag exists in docker
 func (m *Manager) imageExists(repo, tag string) (bool, error) {
+	glog.V(1).Infof("Checking for imageExists %s:%s", repo, tag)
 	if client, err := newDockerClient(m.dockerAddress); err != nil {
+		glog.Errorf("unable to start docker client at docker address: %+v", m.dockerAddress)
 		return false, err
 	} else {
 		repoTag := repo + ":" + tag
@@ -116,6 +120,16 @@ func (m *Manager) SetVolumesDir(dir string) {
 	m.volumesDir = dir
 }
 
+func (m *Manager) SetConfigurationOption(container, key string, value interface{}) error {
+	c, found := m.containers[container]
+	if !found {
+		return errors.New("could not find container")
+	}
+	glog.Infof("setting %s, %s: %s", container, key, value)
+	c.Configuration[key] = value
+	return nil
+}
+
 // checks for the existence of all the container images
 func (m *Manager) allImagesExist() error {
 	for _, c := range m.containers {
@@ -137,10 +151,23 @@ func loadImage(tarball, dockerAddress, repoTag string) error {
 		return err
 	} else {
 		defer file.Close()
-		cmd := exec.Command("docker", "-H", dockerAddress, "import", "-", repoTag)
+		cmd := exec.Command("docker", "-H", dockerAddress, "import", "-")
 		cmd.Stdin = file
-		glog.Infof("Loading docker image")
-		return cmd.Run()
+		glog.Infof("Loading docker image %+v with docker import cmd: %+v", repoTag, cmd.Args)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			glog.Errorf("unable to import docker image %+v with command:%+v output:%s err:%s", repoTag, cmd.Args, output, err)
+			return err
+		}
+
+		importedImageName := strings.Trim(string(output), "\n")
+		tagcmd := exec.Command("docker", "-H", dockerAddress, "tag", importedImageName, repoTag)
+		glog.Infof("Tagging imported docker image %s with tag %s using docker tag cmd: %+v", importedImageName, repoTag, tagcmd.Args)
+		output, err = tagcmd.CombinedOutput()
+		if err != nil {
+			glog.Errorf("unable to tag imported image %s using command:%+v output:%s err: %s\n", importedImageName, tagcmd.Args, output, err)
+			return err
+		}
 	}
 	return nil
 }
@@ -169,6 +196,7 @@ func (m *Manager) wipe() error {
 func (m *Manager) loadImages() error {
 	loadedImages := make(map[string]bool)
 	for _, c := range m.containers {
+		glog.Infof("Checking isvcs container %+v", c)
 		if exists, err := m.imageExists(c.Repo, c.Tag); err != nil {
 			return err
 		} else {
@@ -176,17 +204,25 @@ func (m *Manager) loadImages() error {
 				continue
 			}
 			localTar := path.Join(m.imagesDir, c.Repo, c.Tag+".tar.gz")
-			glog.Infof("Looking for %s", localTar)
-			if _, exists := loadedImages[localTar]; exists {
+			imageRepoTag := c.Repo + ":" + c.Tag
+			glog.Infof("Looking for image %s in tar %s", imageRepoTag, localTar)
+			if _, exists := loadedImages[imageRepoTag]; exists {
 				continue
 			}
 			if _, err := os.Stat(localTar); err == nil {
-				if err := loadImage(localTar, m.dockerAddress, c.Repo+":"+c.Tag); err != nil {
+				if err := loadImage(localTar, m.dockerAddress, imageRepoTag); err != nil {
 					return err
 				}
-				loadedImages[localTar] = true
+				glog.Infof("Loaded %s from %s", imageRepoTag, localTar)
+				loadedImages[imageRepoTag] = true
 			} else {
-
+				glog.Infof("Pulling image %s", imageRepoTag)
+				cmd := exec.Command("docker", "-H", m.dockerAddress, "pull", imageRepoTag)
+				if output, err := cmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("Failed to pull image:(%s) %s ", err, output)
+				}
+				glog.Infof("Pulled %s", imageRepoTag)
+				loadedImages[imageRepoTag] = true
 			}
 		}
 	}

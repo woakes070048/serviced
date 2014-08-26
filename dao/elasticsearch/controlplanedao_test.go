@@ -35,6 +35,7 @@ import (
 	userdomain "github.com/control-center/serviced/domain/user"
 	"github.com/control-center/serviced/facade"
 	"github.com/control-center/serviced/isvcs"
+	"github.com/control-center/serviced/utils"
 	_ "github.com/control-center/serviced/volume"
 	_ "github.com/control-center/serviced/volume/btrfs"
 	_ "github.com/control-center/serviced/volume/rsync"
@@ -77,6 +78,14 @@ func (dt *DaoTest) SetUpSuite(c *C) {
 	dt.Port = 9202
 	isvcs.Init()
 	isvcs.Mgr.SetVolumesDir("/tmp/serviced-test")
+	esServicedClusterName, _ := utils.NewUUID36()
+	if err := isvcs.Mgr.SetConfigurationOption("elasticsearch-serviced", "cluster", esServicedClusterName); err != nil {
+		c.Fatalf("Could not set elasticsearch-serviced clustername: %s", err)
+	}
+	esLogstashClusterName, _ := utils.NewUUID36()
+	if err := isvcs.Mgr.SetConfigurationOption("elasticsearch-logstash", "cluster", esLogstashClusterName); err != nil {
+		c.Fatalf("Could not set elasticsearch-logstash clustername: %s", err)
+	}
 	isvcs.Mgr.Wipe()
 	if err := isvcs.Mgr.Start(); err != nil {
 		c.Fatalf("Could not start es container: %s", err)
@@ -298,7 +307,7 @@ func (dt *DaoTest) TestStoppingParentStopsChildren(t *C) {
 		Startup:        "/usr/bin/ping -c localhost",
 		Description:    "Ping a remote host a fixed number of times",
 		Instances:      1,
-		InstanceLimits: domain.MinMax{1, 1},
+		InstanceLimits: domain.MinMax{1, 1, 1},
 		ImageID:        "test/pinger",
 		PoolID:         "default",
 		DesiredState:   service.SVCRun,
@@ -590,7 +599,7 @@ func (dt *DaoTest) TestAssignAddress(t *C) {
 	h, err := host.Build("", "default", []string{}...)
 	t.Assert(err, IsNil)
 	h.ID = hostid
-	h.IPs = []host.HostIPResource{host.HostIPResource{hostid, ip, "ifname"}}
+	h.IPs = []host.HostIPResource{host.HostIPResource{hostid, ip, "ifname", "macaddress"}}
 	err = dt.Facade.AddHost(dt.CTX, h)
 	if err != nil {
 		t.Errorf("Unexpected error adding host: %v", err)

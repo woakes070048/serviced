@@ -5,9 +5,14 @@
     <div class="details" ng-if="services.current.ID.indexOf('isvc-') == -1">
       <div class="details-form">
         <div class="vertical-info">
-          <label for="app_data_name">{{'label_service_name'|translate}}</label>
-          <input type="text" id="app_data_name" ng-model="services.current.Name"></input>
-        </div>        
+            <label for="app_data_name">{{'label_service_name'|translate}}</label>
+            <input type="text" id="app_data_name" ng-model="services.current.Name"></input>
+        </div>
+
+        <div class="vertical-info">
+            <label for="app_data_description">{{'label_service_description'|translate}}</label>
+            <input type="text" id="app_data_description" ng-model="services.current.Description"></input>
+        </div>
 
         <!-- Only show instance field if there are no defined constraints, the max is defined, or the min is defined but not the max -->
         <div class="vertical-info" ng-show="!services.current.InstanceLimits || services.current.InstanceLimits.Max > 0 || services.current.InstanceLimits.Min > services.current.InstanceLimits.Max">
@@ -117,8 +122,6 @@
         <thead>
           <tr>
             <th>{{'path'|translate}}</th>
-            <th>{{'owner'|translate}}</th>
-            <th>{{'permissions'|translate}}</th>
             <th>{{'running_tbl_actions'|translate}}</th>
           </tr>
         </thead>
@@ -128,8 +131,6 @@
           </tr>
           <tr ng-repeat="configFile in services.current.ConfigFiles">
             <td>{{ configFile.Filename }}</td>
-            <td>{{ configFile.Owner }}</td>
-            <td>{{ configFile.Permissions }}</td>
             <td>
               <button ng-click="editConfig(services.current, configFile.Filename)" class="btn btn-link action"><i class="glyphicon glyphicon-edit"></i> {{'label_edit'|translate}}</button>
             </td>
@@ -147,7 +148,7 @@
           <th style="white-space: nowrap; width:200px;">{{'label_application'|translate}}</th>
           <th style="width: 40px;">{{'label_service_status'|translate}}</th>
           <th style="width: 200px;">{{'host'|translate}}</th>
-          <th style="width: 500px;">{{'label_service_startup'|translate}}</th>
+          <th style="width: 500px;">{{'deployed_tbl_description'|translate}}</th>
           <th>{{'running_tbl_actions'|translate}}</th>
         </tr>
       </thead>
@@ -169,7 +170,7 @@
             <span class="note" ng-show="app.runningHosts.length > 1">&nbsp;(+{{app.runningHosts.length -1}} {{'more' | translate}})</span>
           </td>
           <td>
-            <input style="border:none; background:rgba(0,0,0,0); width:100%; outline: none;" readonly type="text" value="{{app.Startup}}">
+            <input style="border:none; background:rgba(0,0,0,0); width:100%; outline: none;" readonly type="text" value="{{app.Description}}">
           </td>
           <td >
             <div ng-if="app.ID.indexOf('isvc-') == -1">
@@ -261,6 +262,7 @@
       <div ng-repeat="graph in services.current.MonitoringProfile.GraphConfigs track by $index">
         <div class="zenchartContainer">
           <h4>{{graph.name}}</h4>
+          <div class="graphDescrip" ng-if="graph.yAxisLabel">{{graph.yAxisLabel}} over the past Hour</div>
           <div id="{{services.current.ID+'-graph-'+$index}}" class="medChart">{{viz($index, graph)}}</div>
         </div>
       </div>

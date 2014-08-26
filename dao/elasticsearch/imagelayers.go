@@ -11,27 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package isvcs
+
+package elasticsearch
 
 import (
-	"github.com/zenoss/glog"
+	"github.com/control-center/serviced/commons/docker"
 )
 
-var celery *Container
-
-func init() {
-	var err error
-	command := "supervisord -n -c /opt/celery/etc/supervisor.conf"
-	celery, err = NewContainer(
-		ContainerDescription{
-			Name:    "celery",
-			Repo:    IMAGE_REPO,
-			Tag:     IMAGE_TAG,
-			Command: func() string {return command},
-			Ports:   []int{},
-			Volumes: map[string]string{"celery": "/opt/celery/var"},
-		})
-	if err != nil {
-		glog.Fatal("Error initializing celery container: %s", err)
-	}
+func (cp *ControlPlaneDao) ImageLayerCount(imageUUID string, layers* int) error {
+	history, err := docker.ImageHistory(imageUUID)
+	*layers = len(history)
+	return err
 }

@@ -19,9 +19,7 @@
 package node
 
 import (
-	"net"
 	"net/rpc"
-	"net/rpc/jsonrpc"
 
 	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/domain"
@@ -49,12 +47,9 @@ func NewControlClient(addr string) (s *ControlClient, err error) {
 	s = new(ControlClient)
 	s.addr = addr
 	glog.V(4).Infof("Connecting to %s", addr)
-	conn, err := net.Dial("tcp", s.addr)
-	if err != nil {
-		return nil, err
-	}
-	s.rpcClient = jsonrpc.NewClient(conn)
-	return s, nil
+	rpcClient, err := rpc.DialHTTP("tcp", s.addr)
+	s.rpcClient = rpcClient
+	return s, err
 }
 
 // Return the matching hosts.
@@ -278,4 +273,8 @@ func (s *ControlClient) AsyncRestore(backupFilePath string, unused *int) error {
 
 func (s *ControlClient) RestoreStatus(notUsed string, restoreStatus *string) error {
 	return s.rpcClient.Call("ControlPlane.RestoreStatus", notUsed, restoreStatus)
+}
+
+func (s *ControlClient) ImageLayerCount(imageUUID string, layers* int) error {
+	return s.rpcClient.Call("ControlPlane.ImageLayerCount", imageUUID, layers)
 }

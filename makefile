@@ -52,7 +52,7 @@ INSTALL_TEMPLATES_ONLY = 0
 PKG         = $(default_PKG) # deb | rpm
 default_PKG = deb
 
-build_TARGETS = build_isvcs build_js nsinit serviced
+build_TARGETS = build_isvcs build_js serviced
 
 # Define GOPATH for containerized builds.
 #
@@ -145,7 +145,7 @@ $(Godeps_restored): $(GODEP) $(Godeps)
 
 .PHONY: build_isvcs
 build_isvcs: $(Godeps_restored)
-	cd isvcs && make IN_DOCKER=$(IN_DOCKER)
+	cd isvcs && make
 
 .PHONY: build_js
 build_js:
@@ -165,14 +165,7 @@ go:
 # of their GOPATH and type <goprog> instead of the laborious ./<goprog> :-)
 
 docker_SRC = github.com/dotcloud/docker
-nsinit_SRC = $(docker_SRC)/pkg/libcontainer/nsinit
-nsinit: $(Godeps_restored)
-	go build   $($@_SRC)
-	go install $($@_SRC)
 
-nsinit = $(GOBIN)/nsinit
-$(nsinit): $(Godeps_restored)
-	go install $($(@F)_SRC)
 
 # https://www.gnu.org/software/make/manual/html_node/Force-Targets.html
 #
@@ -206,7 +199,6 @@ docker_build: docker_ok
 	-v `pwd`/$(pkg_build_tmp):/tmp \
 	-t zenoss/serviced-build \
 	make GOPATH=$(docker_GOPATH) IN_DOCKER=1 build
-	cd isvcs && make isvcs_repo
 
 # Make the installed godep primitive (under $GOPATH/bin/godep)
 # dependent upon the directory that holds the godep source.
@@ -246,8 +238,6 @@ install_DIRS += $(_DESTDIR)$(sysconfdir)/bash_completion.d
 default_INSTCMD = cp
 $(_DESTDIR)$(prefix)/bin_TARGETS                   = serviced
 $(_DESTDIR)$(prefix)/bin_LINK_TARGETS             += $(prefix)/bin/serviced:$(_DESTDIR)/usr/bin/serviced
-$(_DESTDIR)$(prefix)/bin_TARGETS                  += nsinit
-$(_DESTDIR)$(prefix)/bin_LINK_TARGETS             += $(prefix)/bin/nsinit:$(_DESTDIR)/usr/bin/nsinit
 $(_DESTDIR)$(prefix)/doc_TARGETS                   = doc/copyright:.
 $(_DESTDIR)$(prefix)/share/web_TARGETS             = web/static:static
 $(_DESTDIR)$(prefix)/share/web_INSTOPT             = -R
@@ -255,8 +245,6 @@ $(_DESTDIR)$(prefix)/share/shell_TARGETS           = shell/static:.
 $(_DESTDIR)$(prefix)/share/shell_INSTOPT           = -R
 $(_DESTDIR)$(prefix)/isvcs_TARGETS                 = isvcs/resources:.
 $(_DESTDIR)$(prefix)/isvcs_INSTOPT                 = -R
-$(_DESTDIR)$(prefix)_TARGETS                       = isvcs/images:.
-$(_DESTDIR)$(prefix)_INSTOPT                       = -R
 $(_DESTDIR)$(sysconfdir)/default_TARGETS           = pkg/serviced.default:serviced
 $(_DESTDIR)$(sysconfdir)/bash_completion.d_TARGETS = serviced-bash-completion.sh:serviced
 
@@ -398,7 +386,6 @@ pkgs:
 .PHONY: docker_buildandpackage
 docker_buildandpackage: docker_ok
 	docker build -t zenoss/serviced-build build
-	cd isvcs && make export
 	docker run --rm \
 	-v `pwd`:/go/src/github.com/control-center/serviced \
 	zenoss/serviced-build /bin/bash -c "cd $(docker_serviced_pkg_SRC) && make GOPATH=$(docker_GOPATH) clean"
@@ -465,19 +452,6 @@ docker_ok:
 clean_js:
 	cd web && make clean
 
-.PHONY: clean_nsinit
-clean_nsinit:
-	@for target in nsinit $(nsinit) ;\
-        do \
-                if [ -f "$${target}" ];then \
-                        rm -f $${target} ;\
-			echo "rm -f $${target}" ;\
-                fi ;\
-        done
-	if [ -d "$(GOSRC)/$(nsinit_SRC)" ];then \
-		cd $(GOSRC)/$(nsinit_SRC) && go clean ;\
-	fi
-
 .PHONY: clean_serviced
 clean_serviced:
 	@for target in serviced $(serviced) ;\
@@ -506,7 +480,7 @@ clean_dao:
 	cd dao && make clean
 
 .PHONY: clean
-clean: clean_js clean_nsinit clean_pkg clean_dao clean_godeps clean_serviced
+clean: clean_js clean_pkg clean_dao clean_godeps clean_serviced
 
 .PHONY: docker_clean_pkg
 docker_clean_pkg:
