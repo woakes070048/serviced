@@ -14,8 +14,8 @@
 package service
 
 import (
-	"github.com/zenoss/glog"
 	"github.com/control-center/serviced/datastore/elastic"
+	"github.com/zenoss/glog"
 )
 
 var (
@@ -54,13 +54,6 @@ var (
 		"CreatedAt" :      {"type": "date", "format" : "dateOptionalTime"},
 		"UpdatedAt" :      {"type": "date", "format" : "dateOptionalTime"},
 		"ConfigFiles":     {
-		  "properties": {
-			"": {"type": "string", "index": "not_analyzed"},
-			"": {"type": "string", "index": "not_analyzed"},
-			"": {"type": "string", "index": "not_analyzed"}
-		  }
-		},
-		"OriginalConfigs":     {
 		  "properties": {
 			"": {"type": "string", "index": "not_analyzed"},
 			"": {"type": "string", "index": "not_analyzed"},
