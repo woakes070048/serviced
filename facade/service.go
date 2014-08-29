@@ -136,6 +136,20 @@ func (f *Facade) GetServices(ctx datastore.Context) ([]*service.Service, error) 
 	return results, nil
 }
 
+func (f *Facade) GetServicesByPool(ctx datastore.Context, poolID string) ([]*service.Service, error) {
+	glog.V(3).Infof("Facade.GetServicesByPool")
+	store := f.serviceStore
+	results, err := store.GetServicesByPool(ctx, poolID)
+	if err != nil {
+		glog.Error("Facade.GetServicesByPool: err=", err)
+		return results, err
+	}
+	if err = f.fillOutServices(ctx, results); err != nil {
+		return results, err
+	}
+	return results, nil
+}
+
 //
 func (f *Facade) GetTaggedServices(ctx datastore.Context, request dao.EntityRequest) ([]*service.Service, error) {
 	glog.V(3).Infof("Facade.GetTaggedServices")

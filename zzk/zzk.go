@@ -194,7 +194,11 @@ func Start(shutdown <-chan interface{}, master Listener, listeners ...Listener) 
 	// Start up the master
 	go func() {
 		defer close(done)
-		Listen(_shutdown, ready, master)
+		if master != nil {
+			Listen(_shutdown, ready, master)
+		} else {
+			<-_shutdown
+		}
 	}()
 
 	// Wait for the master to be ready and start the slave listeners
@@ -224,55 +228,4 @@ func Start(shutdown <-chan interface{}, master Listener, listeners ...Listener) 
 	// Wait for everything to stop
 	close(_shutdown)
 	wg.Wait()
-}
-
-// Node manages zookeeper actions
-type Node interface {
-	// GetID relates to the child node mapping in zookeeper
-	GetID() string
-	// Create creates the object in zookeeper
-	Create(conn client.Connection) error
-	// Update updates the object in zookeeper
-	Update(conn client.Connection) error
-}
-
-// Sync synchronizes zookeeper data with what is in elastic or any other storage facility
-func Sync(conn client.Connection, data []Node, zkpath string) error {
-	var current []string
-	if exists, err := PathExists(conn, zkpath); err != nil {
-		return err
-	} else if !exists {
-		// pass
-	} else if current, err = conn.Children(zkpath); err != nil {
-		return err
-	}
-
-	datamap := make(map[string]Node)
-	for i, node := range data {
-		datamap[node.GetID()] = data[i]
-	}
-
-	for _, id := range current {
-		if node, ok := datamap[id]; ok {
-			glog.V(2).Infof("Updating id:'%s' at zkpath:%s with: %+v", id, zkpath, node)
-			if err := node.Update(conn); err != nil {
-				return err
-			}
-			delete(datamap, id)
-		} else {
-			glog.V(2).Infof("Deleting id:'%s' at zkpath:%s not found in elastic\nzk current children: %v", id, zkpath, current)
-			if err := conn.Delete(path.Join(zkpath, id)); err != nil {
-				return err
-			}
-		}
-	}
-
-	for id, node := range datamap {
-		glog.V(2).Infof("Creating id:'%s' at zkpath:%s with: %+v", id, zkpath, node)
-		if err := node.Create(conn); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

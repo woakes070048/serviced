@@ -60,6 +60,23 @@ func SyncResourcePools(conn client.Connection, pools []*pool.ResourcePool) error
 	return zzk.Sync(conn, nodes, poolpath())
 }
 
+func GetResourcePools(conn client.Connection) ([]*pool.ResourcePool, error) {
+	poolIDs, err := conn.Children(poolpath())
+	if err != nil {
+		return nil, err
+	}
+
+	pools := make([]*pool.ResourcePool, len(poolIDs))
+	for i, poolID := range poolIDs {
+		var node PoolNode
+		if err := conn.Get(poolpath(poolID), &node); err != nil {
+			return nil, err
+		}
+		pools[i] = node.ResourcePool
+	}
+	return pools, nil
+}
+
 func AddResourcePool(conn client.Connection, pool *pool.ResourcePool) error {
 	var node PoolNode
 	if err := conn.Create(poolpath(pool.ID), &node); err != nil {

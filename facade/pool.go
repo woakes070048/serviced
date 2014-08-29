@@ -203,6 +203,22 @@ func (f *Facade) GetResourcePools(ctx datastore.Context) ([]*pool.ResourcePool, 
 	return pools, err
 }
 
+//GetResourcePoolsByRealm Returns a list of all ResourcePools by Realm
+func (f *Facade) GetResourcePoolsByRealm(ctx datastore.Context, realm string) ([]*pool.ResourcePool, error) {
+	pools, err := f.poolStore.GetResourcePoolsByRealm(ctx, realm)
+
+	if err != nil {
+		return nil, fmt.Errorf("Could not load pools: %v", err)
+	}
+
+	for _, pool := range pools {
+		f.calcPoolCapacity(ctx, pool)
+		f.calcPoolCommitment(ctx, pool)
+	}
+
+	return pools, err
+}
+
 // GetResourcePool returns  an ResourcePool ip id. nil if not found
 func (f *Facade) GetResourcePool(ctx datastore.Context, id string) (*pool.ResourcePool, error) {
 	glog.V(2).Infof("Facade.GetResourcePool: id=%s", id)

@@ -14,9 +14,13 @@
 package pool
 
 import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/control-center/serviced/datastore"
 	"github.com/zenoss/elastigo/search"
 	"github.com/zenoss/glog"
-	"github.com/control-center/serviced/datastore"
 )
 
 //NewStore creates a ResourcePool store
@@ -34,6 +38,24 @@ func (ps *Store) GetResourcePools(ctx datastore.Context) ([]*ResourcePool, error
 	glog.V(3).Infof("Pool Store.GetResourcePools")
 	q := datastore.NewQuery(ctx)
 	query := search.Query().Search("_exists_:ID")
+	search := search.Search("controlplane").Type(kind).Query(query)
+	results, err := q.Execute(search)
+	if err != nil {
+		return nil, err
+	}
+	return convert(results)
+}
+
+// GetResourcePoolsByRealm gets a list of resource pools by realm
+func (s *Store) GetResourcePoolsByRealm(ctx datastore.Context, realm string) ([]*ResourcePool, error) {
+	glog.V(3).Infof("Pool Store.GetResourcePools")
+	id := strings.TrimSpace(realm)
+	if id == "" {
+		return nil, errors.New("empty realm not allowed")
+	}
+	q := datastore.NewQuery(ctx)
+	queryString := fmt.Sprintf("Realm:%s", id)
+	query := search.Query().Search(queryString)
 	search := search.Search("controlplane").Type(kind).Query(query)
 	results, err := q.Execute(search)
 	if err != nil {
