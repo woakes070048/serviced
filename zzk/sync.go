@@ -37,6 +37,16 @@ type Node interface {
 	Update(conn client.Connection) error
 }
 
+type DirNode struct {
+	version interface{}
+}
+
+func (node *DirNode) Version() interface{}                { return node.version }
+func (node *DirNode) SetVersion(version interface{})      { node.version = version }
+func (node *DirNode) GetID() string                       { return "" }
+func (node *DirNode) Create(conn client.Connection) error { return nil }
+func (node *DirNode) Update(conn client.Connection) error { return nil }
+
 // Sync synchronizes zookeeper data with what is in elastic or any other storage facility
 func Sync(conn client.Connection, data []Node, zkpath string) error {
 	var current []string
@@ -82,6 +92,7 @@ func Sync(conn client.Connection, data []Node, zkpath string) error {
 type SyncHandler interface {
 	GetPathBasedConnection(path string) (client.Connection, error)
 	GetPath(nodes ...string) string
+	Allocate() Node
 	GetAll() ([]Node, error)
 	AddOrUpdate(nodeID string, node Node) error
 	Delete(nodeID string) error
@@ -90,8 +101,8 @@ type SyncHandler interface {
 // SyncListener is the listener for synchronizing remote coordinator to local db
 type SyncListener struct {
 	SyncHandler
-	conn        client.Connection
-	getListener []func(conn client.Connection, nodeID string) Listener
+	conn   client.Connection
+	lfuncs []GetListener
 }
 
 // NewSyncListener instantiates a new SyncListener
@@ -100,12 +111,12 @@ func NewSyncListener(conn client.Connection, handler SyncHandler) *SyncListener 
 }
 
 // AddListener adds a new Listener
-func (l *SyncListener) AddListener(lfunc func(conn client.Connection, nodeID string) Listener) {
-	l.getListener = append(l.getListener, lfunc)
+func (l *SyncListener) AddListener(f GetListener) {
+	l.lfuncs = append(l.lfuncs, f)
 }
 
 // GetConnection gets the coordinator client connection
-func (l *SyncListener) GetConnection() client.Connection { return l.conn }
+func (l *SyncListener) SetConnection(conn client.Connection) { l.conn = conn }
 
 // Ready deletes data from the db that does not exist in the remote coordinator
 func (l *SyncListener) Ready() error { return nil }
@@ -135,11 +146,18 @@ func (l *SyncListener) Spawn(shutdown <-chan interface{}, nodeID string) {
 	// Start any dependent listeners
 	_shutdown := make(chan interface{})
 	var wg sync.WaitGroup
+	wg.Add(1)
 
 	go func() {
-		wg.Add(1)
 		defer wg.Done()
-		l.startListeners(_shutdown, nodeID)
+		for {
+			l.startListeners(_shutdown, nodeID)
+			select {
+			case <-_shutdown:
+				return
+			default:
+			}
+		}
 	}()
 
 	defer func() {
@@ -150,7 +168,7 @@ func (l *SyncListener) Spawn(shutdown <-chan interface{}, nodeID string) {
 	var id string
 	var wait <-chan time.Time
 	for {
-		var node Node
+		node := l.Allocate()
 		event, err := l.conn.GetW(l.GetPath(nodeID), node)
 
 		if err == client.ErrNoNode && id != "" {
@@ -190,10 +208,10 @@ func (l *SyncListener) startListeners(shutdown <-chan interface{}, nodeID string
 		return
 	}
 
-	listeners := make([]Listener, len(l.getListener))
-	for i, gl := range l.getListener {
-		listeners[i] = gl(conn, nodeID)
+	listeners := make([]Listener, len(l.lfuncs))
+	for i, getListener := range l.lfuncs {
+		listeners[i] = getListener(nodeID)
 	}
 
-	Start(shutdown, nil, listeners...)
+	start(shutdown, conn, listeners...)
 }

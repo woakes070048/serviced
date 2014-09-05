@@ -58,12 +58,12 @@ type SnapshotListener struct {
 }
 
 // NewSnapshotListener instantiates a new listener for snapshots
-func NewSnapshotListener(conn client.Connection, handler SnapshotHandler) *SnapshotListener {
-	return &SnapshotListener{conn, handler}
+func NewSnapshotListener(handler SnapshotHandler) *SnapshotListener {
+	return &SnapshotListener{handler: handler}
 }
 
-// GetConnection implements zzk.Listener
-func (l *SnapshotListener) GetConnection() client.Connection { return l.conn }
+// SetConnection implements zzk.Listener
+func (l *SnapshotListener) SetConnection(conn client.Connection) { l.conn = conn }
 
 // GetPath implements zzk.Listener
 func (l *SnapshotListener) GetPath(nodes ...string) string { return snapshotPath(nodes...) }

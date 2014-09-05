@@ -80,9 +80,8 @@ type VirtualIPListener struct {
 }
 
 // NewVirtualIPListener instantiates a new VirtualIPListener object
-func NewVirtualIPListener(conn client.Connection, handler VirtualIPHandler, hostID string) *VirtualIPListener {
+func NewVirtualIPListener(handler VirtualIPHandler, hostID string) *VirtualIPListener {
 	l := &VirtualIPListener{
-		conn:    conn,
 		handler: handler,
 		hostID:  hostID,
 		index:   make(chan int),
@@ -101,7 +100,7 @@ func NewVirtualIPListener(conn client.Connection, handler VirtualIPHandler, host
 }
 
 // GetConnection implements zzk.Listener
-func (l *VirtualIPListener) GetConnection() client.Connection { return l.conn }
+func (l *VirtualIPListener) SetConnection(conn client.Connection) { l.conn = conn }
 
 // GetPath implements zzk.Listener
 func (l *VirtualIPListener) GetPath(nodes ...string) string {

@@ -59,9 +59,9 @@ func TestActionListener_Listen(t *testing.T) {
 	shutdown := make(chan interface{})
 	done := make(chan interface{})
 
-	listener := NewActionListener(conn, handler, "test-host-1")
+	listener := NewActionListener(handler, "test-host-1")
 	go func() {
-		zzk.Listen(shutdown, make(chan error, 1), listener)
+		zzk.Listen(shutdown, make(chan error, 1), conn, listener)
 		close(done)
 	}()
 

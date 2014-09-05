@@ -15,7 +15,6 @@ package scheduler
 
 import (
 	"sync"
-	"time"
 
 	coordclient "github.com/control-center/serviced/coordinator/client"
 	"github.com/control-center/serviced/dao"
@@ -70,26 +69,21 @@ func (s *scheduler) Start() {
 	s.started = true
 
 	go func() {
-
 		defer func() {
 			close(s.stopped)
 			s.started = false
 		}()
 
-	restart:
 		for {
+			var conn coordclient.Connection
 			select {
-			case s.conn = <-zzk.Connect("/", zzk.GetLocalConnection):
-				if s.conn == nil {
-					// wait a second and try again
-					<-time.After(time.Second)
-					continue restart
+			case conn = <-zzk.Connect("/", zzk.GetLocalConnection):
+				if conn != nil {
+					s.mainloop(conn)
 				}
 			case <-s.shutdown:
 				return
 			}
-
-			s.mainloop()
 
 			select {
 			case <-s.shutdown:
@@ -102,9 +96,9 @@ func (s *scheduler) Start() {
 }
 
 // mainloop acquires the leader lock and initializes the listener
-func (s *scheduler) mainloop() {
+func (s *scheduler) mainloop(conn coordclient.Connection) {
 	// become the leader
-	leader := zzk.NewHostLeader(s.conn, s.instance_id, "/scheduler")
+	leader := zzk.NewHostLeader(conn, s.instance_id, "/scheduler")
 	event, err := leader.TakeLead()
 	if err != nil {
 		glog.Errorf("Could not become the leader: %s", err)
@@ -124,7 +118,7 @@ func (s *scheduler) mainloop() {
 		stopped   = make(chan interface{})
 	)
 
-	er, err := registry.CreateEndpointRegistry(s.conn)
+	er, err := registry.CreateEndpointRegistry(conn)
 	if err != nil {
 		glog.Errorf("Could not initialize endpoint registry: %s", err)
 		return
@@ -138,7 +132,7 @@ func (s *scheduler) mainloop() {
 
 	go func() {
 		defer close(stopped)
-		zzk.Listen(_shutdown, make(chan error, 1), s)
+		zzk.Listen(_shutdown, make(chan error, 1), conn, s)
 	}()
 
 	// wait for something to happen
@@ -166,8 +160,8 @@ func (s *scheduler) Stop() {
 	<-s.stopped
 }
 
-// GetConnection implements zzk.Listener
-func (s *scheduler) GetConnection() coordclient.Connection { return s.conn }
+// SetConnection implements zzk.Listener
+func (s *scheduler) SetConnection(conn coordclient.Connection) { s.conn = conn }
 
 // GetPath implements zzk.Listener
 func (s *scheduler) GetPath(nodes ...string) string {

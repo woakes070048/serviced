@@ -34,6 +34,8 @@ func NewPoolSyncListener(conn client.Connection, handler PoolSyncHandler) *zzk.S
 	return zzk.NewSyncListener(conn, poolSync)
 }
 
+func (l *PoolSyncListener) Allocate() zzk.Node { return &PoolNode{} }
+
 func (l *PoolSyncListener) GetPathBasedConnection(path string) (client.Connection, error) {
 	return l.handler.GetPathBasedConnection(path)
 }

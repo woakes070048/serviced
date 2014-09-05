@@ -58,12 +58,12 @@ type ActionListener struct {
 }
 
 // NewActionListener instantiates a new action listener for /docker/actions
-func NewActionListener(conn client.Connection, handler ActionHandler, hostID string) *ActionListener {
-	return &ActionListener{conn, handler, hostID}
+func NewActionListener(handler ActionHandler, hostID string) *ActionListener {
+	return &ActionListener{handler: handler, hostID: hostID}
 }
 
 // GetConnection implements zzk.Listener
-func (l *ActionListener) GetConnection() client.Connection { return l.conn }
+func (l *ActionListener) SetConnection(conn client.Connection) { l.conn = conn }
 
 // GetPath implements zzk.Listener
 func (l *ActionListener) GetPath(nodes ...string) string {

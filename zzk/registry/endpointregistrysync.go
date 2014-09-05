@@ -30,6 +30,8 @@ func NewEndpointSyncListener(remote, local client.Connection, registry *Endpoint
 	return zzk.NewSyncListener(remote, epSync)
 }
 
+func (l *EndpointSyncListener) Allocate() zzk.Node { return &EndpointNode{} }
+
 func (l *EndpointSyncListener) GetPathBasedConnection(path string) (client.Connection, error) {
 	return l.conn, nil
 }
@@ -73,6 +75,8 @@ func NewEndpointRegistrySyncListener(remote, local client.Connection, registry *
 	erSync := &EndpointRegistrySyncListener{local, registry}
 	return zzk.NewSyncListener(remote, erSync)
 }
+
+func (l *EndpointRegistrySyncListener) Allocate() zzk.Node { return &zzk.DirNode{} }
 
 func (l *EndpointRegistrySyncListener) GetPathBasedConnection(path string) (client.Connection, error) {
 	return l.conn, nil

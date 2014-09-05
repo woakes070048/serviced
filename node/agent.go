@@ -839,19 +839,19 @@ func (a *HostAgent) Start(shutdown <-chan interface{}) {
 		glog.Info("Got a connected client")
 
 		// watch virtual IP zookeeper nodes
-		virtualIPListener := virtualips.NewVirtualIPListener(conn, a, a.hostID)
+		virtualIPListener := virtualips.NewVirtualIPListener(a, a.hostID)
 
 		// watch docker action nodes
-		actionListener := zkdocker.NewActionListener(conn, a, a.hostID)
+		actionListener := zkdocker.NewActionListener(a, a.hostID)
 
 		// watch the host state nodes
 		// this blocks until
 		// 1) has a connection
 		// 2) its node is registered
 		// 3) receieves signal to shutdown or breaks
-		hsListener := zkservice.NewHostStateListener(conn, a, a.hostID)
+		hsListener := zkservice.NewHostStateListener(a, a.hostID)
 
-		zzk.Start(shutdown, hsListener, virtualIPListener, actionListener)
+		zzk.Start(shutdown, conn, hsListener, virtualIPListener, actionListener)
 		glog.Infof("Host Agent Listeners are done")
 
 		select {

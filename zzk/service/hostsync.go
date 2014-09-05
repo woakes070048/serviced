@@ -35,6 +35,8 @@ func NewHostSyncListener(conn client.Connection, handler HostSyncHandler, poolID
 	return zzk.NewSyncListener(conn, hostSync)
 }
 
+func (l *HostSyncListener) Allocate() zzk.Node { return &HostNode{} }
+
 func (l *HostSyncListener) GetPathBasedConnection(path string) (client.Connection, error) {
 	return l.conn, nil
 }

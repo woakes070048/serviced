@@ -35,6 +35,8 @@ func NewServiceSyncListener(conn client.Connection, handler ServiceSyncHandler, 
 	return zzk.NewSyncListener(conn, svcSync)
 }
 
+func (l *ServiceSyncListener) Allocate() zzk.Node { return &ServiceNode{} }
+
 func (l *ServiceSyncListener) GetPathBasedConnection(path string) (client.Connection, error) {
 	return l.conn, nil
 }
