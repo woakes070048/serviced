@@ -60,13 +60,6 @@ var (
 			"": {"type": "string", "index": "not_analyzed"}
 		  }
 		},
-		"OriginalConfigs":     {
-		  "properties": {
-			"": {"type": "string", "index": "not_analyzed"},
-			"": {"type": "string", "index": "not_analyzed"},
-			"": {"type": "string", "index": "not_analyzed"}
-		  }
-		},
 		"EndPoints" :      {
 		  "properties":    {
 			"Protocol" :            {"type": "string", "index":"not_analyzed"},

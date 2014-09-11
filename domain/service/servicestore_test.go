@@ -51,7 +51,7 @@ func (s *S) Test_ServiceCRUD(t *C) {
 	svc := &Service{ID: "svc_test_id", PoolID: "testPool", Name: "svc_name", Launch: "auto"}
 
 	confFile := servicedefinition.ConfigFile{Content: "Test content", Filename: "testname"}
-	svc.OriginalConfigs = map[string]servicedefinition.ConfigFile{"testname": confFile}
+	svc.ConfigFiles = map[string]servicedefinition.ConfigFile{"testname": confFile}
 
 	svc2, err := s.store.Get(s.ctx, svc.ID)
 	t.Assert(err, NotNil)
@@ -71,8 +71,8 @@ func (s *S) Test_ServiceCRUD(t *C) {
 	t.Assert(err, IsNil)
 
 	t.Assert(svc2.Description, Equals, svc.Description)
-	t.Assert(len(svc2.ConfigFiles), Equals, len(svc.OriginalConfigs))
-	t.Assert(svc2.ConfigFiles["testname"], Equals, svc.OriginalConfigs["testname"])
+	t.Assert(len(svc2.ConfigFiles), Equals, len(svc.ConfigFiles))
+	t.Assert(svc2.ConfigFiles["testname"], Equals, svc.ConfigFiles["testname"])
 
 	//test delete
 	err = s.store.Delete(s.ctx, svc.ID)

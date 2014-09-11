@@ -14,29 +14,32 @@
 package serviceconfigfile
 
 import (
-	"github.com/control-center/serviced/datastore"
+	"time"
+
 	"github.com/control-center/serviced/domain/servicedefinition"
 	"github.com/control-center/serviced/utils"
 )
 
-//SvcConfigFile is used to store and track service config files that have been modified
-type SvcConfigFile struct {
-	ID              string
-	ServiceTenantID string
-	ServicePath     string
-	ConfFile        servicedefinition.ConfigFile
-	datastore.VersionedEntity
+// ServiceConfig is used to store and track service config files that have been modified
+type ServiceConfig struct {
+	ID          string                         // guid of the configuration
+	ServiceID   string                         // service that owns the configuration
+	ConfigFiles []servicedefinition.ConfigFile // config files for that service
+	Updated     time.Time                      // datetime when the configuration was updated
+	Commit      string                         // optional commit message to describe the change made to the configuration
 }
 
-//New creates a SvcConfigFile
-func New(tenantID string, svcPath string, conf servicedefinition.ConfigFile) (*SvcConfigFile, error) {
+// New instantiates a new ServiceConfig
+func New(serviceID, commit string, conf []servicedefinition.ConfigFile) (*ServiceConfig, error) {
 	uuid, err := utils.NewUUID()
 	if err != nil {
 		return nil, err
 	}
-	svcCF := &SvcConfigFile{ID: uuid, ServiceTenantID: tenantID, ServicePath: svcPath, ConfFile: conf}
-	if err = svcCF.ValidEntity(); err != nil {
+
+	svcconf := &ServiceConfig{ID: uuid, ServiceID: serviceID, ConfigFiles: conf, Updated: time.Now(), Commit: commit}
+	if err := svcconf.ValidEntity(); err != nil {
 		return nil, err
 	}
-	return svcCF, nil
+
+	return svcconf, nil
 }
