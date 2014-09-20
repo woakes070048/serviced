@@ -43,6 +43,7 @@ func (s *Store) Put(ctx datastore.Context, svc *Service) error {
 
 // Get a Service by id. Return ErrNoSuchEntity if not found
 func (s *Store) Get(ctx datastore.Context, id string) (*Service, error) {
+
 	svc := &Service{}
 	if err := s.ds.Get(ctx, Key(id), svc); err != nil {
 		return nil, err

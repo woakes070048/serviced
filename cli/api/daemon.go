@@ -14,6 +14,8 @@
 package api
 
 import (
+	"log"
+
 	coordclient "github.com/control-center/serviced/coordinator/client"
 	coordzk "github.com/control-center/serviced/coordinator/client/zookeeper"
 	"github.com/control-center/serviced/coordinator/storage"
@@ -56,6 +58,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"os"
@@ -127,6 +130,10 @@ func (d *daemon) run() error {
 	if err != nil {
 		glog.Fatalf("could not get hostid: %s", err)
 	}
+
+	go func() {
+		log.Println(http.ListenAndServe(":6060", nil))
+	}()
 
 	l, err := net.Listen("tcp", options.Listen)
 	if err != nil {
