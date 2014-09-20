@@ -16,6 +16,10 @@ package datastore
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
+
+	"github.com/control-center/serviced/commons"
 )
 
 var (
@@ -51,6 +55,10 @@ type ValidEntity interface {
 	SetDatabaseVersion(int)
 }
 
+func getcachekey(key Key) string {
+	return fmt.Sprintf("%s|%s", key.Kind(), key.ID())
+}
+
 //New returns a new EntityStore
 func New() EntityStore {
 	return &DataStore{}
@@ -67,6 +75,8 @@ func (e *VersionedEntity) GetDatabaseVersion() int {
 func (e *VersionedEntity) SetDatabaseVersion(i int) {
 	e.DatabaseVersion = i
 }
+
+var cache = commons.NewCache()
 
 //DataStore EntityStore type
 type DataStore struct{}
@@ -98,8 +108,14 @@ func (ds *DataStore) Put(ctx Context, key Key, entity ValidEntity) error {
 	if err != nil {
 		return err
 	}
-	return conn.Put(key, jsonMsg)
+	err = conn.Put(key, jsonMsg)
+	if err == nil {
+		cache.Add(getcachekey(key), entity)
+	}
+	return err
 }
+
+// datastore.Get(ctx, &service.Service{})
 
 // Get an entity. Return ErrNoSuchEntity if nothing found for the key.
 func (ds *DataStore) Get(ctx Context, key Key, entity ValidEntity) error {
@@ -114,6 +130,14 @@ func (ds *DataStore) Get(ctx Context, key Key, entity ValidEntity) error {
 	}
 	if err := validKey(key); err != nil {
 		return err
+	}
+
+	if val, ok := cache.Get(getcachekey(key)); ok {
+		// Now the fun part: need to replace the pointer passed in with
+		// the pointer to our new copy of the cached value
+		target := reflect.ValueOf(entity)
+		target.Elem().Set(reflect.ValueOf(val).Elem())
+		return nil
 	}
 
 	conn, err := ctx.Connection()
@@ -146,6 +170,7 @@ func (ds *DataStore) Delete(ctx Context, key Key) error {
 		return err
 	}
 
+	//defer mycache.invalidate(key)
 	return conn.Delete(key)
 }
 
