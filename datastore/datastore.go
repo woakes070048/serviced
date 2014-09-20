@@ -164,6 +164,7 @@ func (ds *DataStore) Delete(ctx Context, key Key) error {
 	if err != nil {
 		return err
 	}
+	cache.Invalidate(getcachekey(key))
 
 	//defer mycache.invalidate(key)
 	return conn.Delete(key)
