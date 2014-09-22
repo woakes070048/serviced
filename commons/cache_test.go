@@ -61,7 +61,7 @@ func TestGetInto(t *testing.T) {
 	target = testObject{}
 
 	c.Add("abc", source)
-	ok := c.GetInto("abc", &target)
+	ok, _ := c.GetInto("abc", &target)
 	if !ok {
 		t.Fatalf("Couldn't GetInto() a valid cache item")
 	}
