@@ -1,6 +1,9 @@
 package commons
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 type testObject struct {
 	i int
@@ -20,11 +23,13 @@ func TestInvalidateCache(t *testing.T) {
 
 func TestAddToCache(t *testing.T) {
 	c := NewCache()
-	var orig interface{}
-	orig = testObject{}
+	var (
+		orig interface{}
+	)
+	obj := testObject{4}
+	orig = obj
 
 	c.Add("abc", orig)
-
 	val, ok := c.data["abc"]
 	if !ok {
 		t.Fatalf("Add() didn't add to the cache")
@@ -67,6 +72,7 @@ func TestGetInto(t *testing.T) {
 	}
 	isto, ok := target.(testObject)
 	if isto.i != 5 {
+		fmt.Printf("%+v %+v", isto, source)
 		t.Fatalf("GetInto() target doesn't match original")
 	}
 }
