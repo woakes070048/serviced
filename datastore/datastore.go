@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 
 	"github.com/control-center/serviced/commons"
 )
@@ -132,12 +131,8 @@ func (ds *DataStore) Get(ctx Context, key Key, entity ValidEntity) error {
 		return err
 	}
 
-	if val, ok := cache.Get(getcachekey(key)); ok {
-		// Now the fun part: need to replace the pointer passed in with
-		// the pointer to our new copy of the cached value
-		target := reflect.ValueOf(entity)
-		target.Elem().Set(reflect.ValueOf(val).Elem())
-		return nil
+	if ok, err := cache.GetInto(getcachekey(key), entity); ok {
+		return err
 	}
 
 	conn, err := ctx.Connection()
