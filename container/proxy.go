@@ -63,28 +63,21 @@ The netcat (nc) command is particularly useful for this:
 */
 
 type proxy struct {
-	name             string              // Name of the remote service
-	tenantEndpointID string              // Tenant endpoint ID
-	addresses        []string            // Public IP:Port of the remote service
-	tcpMuxPort       uint16              // the port to use for TCP Muxing, 0 is disabled
-	useTLS           bool                // use encryption over mux port
-	closing          chan chan error     // internal shutdown signal
-	newAddresses     chan []string       // a stream of updates to the addresses
-	listener         net.Listener        // handle on the listening socket
-	hostIPs          map[string]struct{} // IPs of the host on which this container is running
+	name             string          // Name of the remote service
+	tenantEndpointID string          // Tenant endpoint ID
+	addresses        []string        // Public IP:Port of the remote service
+	tcpMuxPort       uint16          // the port to use for TCP Muxing, 0 is disabled
+	useTLS           bool            // use encryption over mux port
+	closing          chan chan error // internal shutdown signal
+	newAddresses     chan []string   // a stream of updates to the addresses
+	listener         net.Listener    // handle on the listening socket
 }
 
 // Newproxy create a new proxy object. It starts listening on the prxy port asynchronously.
-func newProxy(name, tenantEndpointID string, tcpMuxPort uint16, useTLS bool, listener net.Listener, hostIPs []string) (p *proxy, err error) {
+func newProxy(name, tenantEndpointID string, tcpMuxPort uint16, useTLS bool, listener net.Listener) (p *proxy, err error) {
 	if len(name) == 0 {
 		return nil, fmt.Errorf("prxy: name can not be empty")
 	}
-	ipset := make(map[string]struct{})
-	glog.Infof("Received hostIPs %q", hostIPs)
-	for _, val := range hostIPs {
-		ipset[val] = struct{}{}
-	}
-	glog.Infof("Now my map is %q", ipset)
 	p = &proxy{
 		name:             name,
 		tenantEndpointID: tenantEndpointID,
@@ -92,7 +85,6 @@ func newProxy(name, tenantEndpointID string, tcpMuxPort uint16, useTLS bool, lis
 		tcpMuxPort:       tcpMuxPort,
 		useTLS:           useTLS,
 		listener:         listener,
-		hostIPs:          ipset,
 	}
 	p.newAddresses = make(chan []string, 2)
 	go p.listenAndproxy()
@@ -174,21 +166,14 @@ func (p *proxy) listenAndproxy() {
 // of endpoints.
 func (p *proxy) prxy(local net.Conn, address string) {
 	remoteAddr := address
-	isMux := false
-	isLocal := false
 	// NOTE: here we are relying on the initial remoteAddr to have the
 	//       publicly exposed port for the target service. If TCPMux is
 	//       in play that port will be replaced with the TCPMux port, so
 	//       we grab it here in order to be able to create a proper Zen-Service
 	//       header later.
+	isMux := false
 	hostIP := strings.Split(remoteAddr, ":")[0]
-	glog.Infof("hostIP is %s", hostIP)
-	glog.Infof("is %s in %+v?", hostIP, p.hostIPs)
-	if _, ok := p.hostIPs[hostIP]; ok {
-		glog.Infof("hostIP is %s, so this is a local address", hostIP)
-		isLocal = true
-	}
-	if p.tcpMuxPort > 0 && !isLocal {
+	if p.tcpMuxPort > 0 && !isLocalAddress(hostIP) {
 		isMux = true
 		remoteAddr = fmt.Sprintf("%s:%d", strings.Split(remoteAddr, ":")[0], p.tcpMuxPort)
 	}
@@ -196,7 +181,7 @@ func (p *proxy) prxy(local net.Conn, address string) {
 	var remote net.Conn
 	var err error
 
-	glog.V(0).Infof("Dialing hostAgent:%v to prxy %v<->%v<->%v",
+	glog.V(2).Infof("Dialing hostAgent:%v to prxy %v<->%v<->%v",
 		remoteAddr, local.LocalAddr(), local.RemoteAddr(), address)
 	if p.useTLS && isMux { // Only do TLS if connecting to a TCPMux
 		config := tls.Config{InsecureSkipVerify: true}

@@ -535,9 +535,6 @@ func (c *Controller) setProxyAddresses(tenantEndpointID string, endpoints []dao.
 	// Now iterate over all the keys, create the proxies, and feed the the addresses for each instance
 
 	// Get the host IPs so we'll know if a service is remote
-	hostips := strings.Fields(strings.Trim(os.Getenv("CONTROLPLANE_HOST_IPS"), "'"))
-	glog.Infof("hostips: %q", hostips)
-
 	for instanceID, proxyKey := range proxyKeys {
 		prxy, ok := proxies[proxyKey]
 		if !ok {
@@ -554,7 +551,7 @@ func (c *Controller) setProxyAddresses(tenantEndpointID string, endpoints []dao.
 			}
 
 			var err error
-			prxy, err = createNewProxy(proxyKey, endpoint, hostips)
+			prxy, err = createNewProxy(proxyKey, endpoint)
 			if err != nil {
 				glog.Errorf("error with createNewProxy(%s, %+v) %v", proxyKey, endpoint, err)
 				return
@@ -585,7 +582,7 @@ func (c *Controller) setProxyAddresses(tenantEndpointID string, endpoints []dao.
 }
 
 // createNewProxy creates a new proxy
-func createNewProxy(tenantEndpointID string, endpoint dao.ApplicationEndpoint, hostips []string) (*proxy, error) {
+func createNewProxy(tenantEndpointID string, endpoint dao.ApplicationEndpoint) (*proxy, error) {
 	glog.Infof("Attempting port map for: %s -> %+v", tenantEndpointID, endpoint)
 
 	// setup a new proxy
@@ -599,8 +596,7 @@ func createNewProxy(tenantEndpointID string, endpoint dao.ApplicationEndpoint, h
 		tenantEndpointID,
 		cMuxPort,
 		cMuxTLS,
-		listener,
-		hostips)
+		listener)
 	if err != nil {
 		glog.Errorf("Could not build proxy: %s", err)
 		return nil, err
