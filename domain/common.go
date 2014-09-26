@@ -59,9 +59,10 @@ func (minmax *MinMax) Validate() error {
 
 // HealthCheck is a health check object
 type HealthCheck struct {
-	Script   string        // A script to execute to verify the health of a service.
-	Interval time.Duration // The interval at which to execute the script.
-	Timeout  time.Duration // A timeout in which to complete the health check.
+	Script         string        // A script to execute to verify the health of a service.
+	Interval       time.Duration // The interval at which to execute the script.
+	Timeout        time.Duration // A timeout in which to complete the health check.
+	ServiceVersion int           // The version of the service
 }
 
 type jsonHealthCheck struct {

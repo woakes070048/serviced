@@ -142,7 +142,15 @@ func (f *Facade) GetHealthChecksForService(ctx datastore.Context, serviceID stri
 	if err != nil {
 		return nil, err
 	}
-	return svc.HealthChecks, nil
+
+	// Add the version to the healthcheck
+	healthchecks := svc.HealthChecks
+	for key, hc := range healthchecks {
+		hc.ServiceVersion = svc.DatabaseVersion
+		healthchecks[key] = hc
+	}
+
+	return healthchecks, nil
 }
 
 func (f *Facade) GetService(ctx datastore.Context, id string) (*service.Service, error) {
