@@ -83,7 +83,6 @@ type HostAgent struct {
 	mount                []string             // each element is in the form: dockerImage,hostPath,containerPath
 	vfs                  string               // driver for container volumes
 	currentServices      map[string]*exec.Cmd // the current running services
-	mux                  *proxy.TCPMux
 	proxyRegistry        proxy.ProxyRegistry
 	zkClient             *coordclient.Client
 	dockerRegistry       string        // the docker registry to use
@@ -118,7 +117,6 @@ type AgentOptions struct {
 	Mount                []string
 	VFS                  string
 	Zookeepers           []string
-	Mux                  *proxy.TCPMux
 	DockerRegistry       string
 	MaxContainerAge      time.Duration // Maximum container age for a stopped container before being removed
 	VirtualAddressSubnet string
@@ -136,7 +134,6 @@ func NewHostAgent(options AgentOptions) (*HostAgent, error) {
 	agent.varPath = options.VarPath
 	agent.mount = options.Mount
 	agent.vfs = options.VFS
-	agent.mux = options.Mux
 	agent.maxContainerAge = options.MaxContainerAge
 	agent.virtualAddressSubnet = options.VirtualAddressSubnet
 

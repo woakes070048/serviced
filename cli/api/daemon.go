@@ -48,7 +48,6 @@ import (
 	"github.com/control-center/serviced/web"
 	"github.com/control-center/serviced/zzk"
 
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +79,7 @@ type daemon struct {
 	hostID           string
 	zClient          *coordclient.Client
 	storageHandler   *storage.Server
+	mux              muxController
 	masterPoolID     string
 	hostAgent        *node.HostAgent
 	shutdown         chan interface{}
@@ -205,6 +205,9 @@ func (d *daemon) run() error {
 	}
 	// finally, close all connections to zookeeper
 	zzk.ShutdownConnections()
+	if d.mux != nil {
+		d.mux.Close()
+	}
 	return nil
 }
 
@@ -331,38 +334,12 @@ func getKeyPairs(certPEMFile, keyPEMFile string) (certPEM, keyPEM []byte, err er
 	return
 }
 
-func createMuxListener() (net.Listener, error) {
-	if options.TLS {
-		glog.V(1).Info("using TLS on mux")
-
-		proxyCertPEM, proxyKeyPEM, err := getKeyPairs(options.CertPEMFile, options.KeyPEMFile)
-		if err != nil {
-			return nil, err
-		}
-
-		cert, err := tls.X509KeyPair([]byte(proxyCertPEM), []byte(proxyKeyPEM))
-		if err != nil {
-			glog.Error("ListenAndMux Error (tls.X509KeyPair): ", err)
-			return nil, err
-		}
-
-		tlsConfig := tls.Config{Certificates: []tls.Certificate{cert}}
-		glog.V(1).Infof("TLS enabled tcp mux listening on %d", options.MuxPort)
-		return tls.Listen("tcp", fmt.Sprintf(":%d", options.MuxPort), &tlsConfig)
-
-	}
-	return net.Listen("tcp", fmt.Sprintf(":%d", options.MuxPort))
-}
-
 func (d *daemon) startAgent() error {
-	muxListener, err := createMuxListener()
+	mux, err := newMuxController(true)
 	if err != nil {
 		return err
 	}
-	mux, err := proxy.NewTCPMux(muxListener)
-	if err != nil {
-		return err
-	}
+	d.mux = mux
 
 	agentIP := options.OutboundIP
 	if agentIP == "" {
@@ -478,7 +455,6 @@ func (d *daemon) startAgent() error {
 			Mount:                options.Mount,
 			VFS:                  options.VFS,
 			Zookeepers:           options.Zookeepers,
-			Mux:                  mux,
 			DockerRegistry:       options.DockerRegistry,
 			MaxContainerAge:      time.Duration(int(time.Second) * options.MaxContainerAge),
 			VirtualAddressSubnet: options.VirtualAddressSubnet,

@@ -95,4 +95,7 @@ type API interface {
 
 	// Logs
 	ExportLogs(config ExportLogsConfig) error
+
+	// Mux
+	Mux(port int, tls bool, keyfile, certfile string) error
 }

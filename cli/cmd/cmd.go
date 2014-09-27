@@ -21,10 +21,10 @@ import (
 
 	"github.com/codegangsta/cli"
 	"github.com/control-center/serviced/cli/api"
+	"github.com/control-center/serviced/isvcs"
 	"github.com/control-center/serviced/servicedversion"
 	"github.com/control-center/serviced/validation"
 	"github.com/zenoss/glog"
-	"github.com/control-center/serviced/isvcs"
 )
 
 // ServicedCli is the client ui for serviced
@@ -118,11 +118,11 @@ func New(driver api.API) *ServicedCli {
 	}
 
 	isvcs_env := cli.StringSlice{}
-	if env :=configEnv("ISVCS_ENV", ""); len(env) != 0 {
+	if env := configEnv("ISVCS_ENV", ""); len(env) != 0 {
 		isvcs_env = append(isvcs_env, env)
 	}
-	for i:=0; ;i++{
-		if env :=configEnv(fmt.Sprintf("ISVCS_ENV_%d", i), ""); len(env) != 0 {
+	for i := 0; ; i++ {
+		if env := configEnv(fmt.Sprintf("ISVCS_ENV_%d", i), ""); len(env) != 0 {
 			isvcs_env = append(isvcs_env, env)
 		} else {
 			break
@@ -197,6 +197,7 @@ func New(driver api.API) *ServicedCli {
 	c.initLog()
 	c.initBackup()
 	c.initDocker()
+	c.initMux()
 
 	return c
 }
@@ -325,8 +326,8 @@ func setLogging(ctx *cli.Context) error {
 	return nil
 }
 
-func setIsvcsEnv(ctx *cli.Context ) error {
-	for _, val := range(ctx.GlobalStringSlice("isvcs-env")) {
+func setIsvcsEnv(ctx *cli.Context) error {
+	for _, val := range ctx.GlobalStringSlice("isvcs-env") {
 		if err := isvcs.AddEnv(val); err != nil {
 			return err
 		}
