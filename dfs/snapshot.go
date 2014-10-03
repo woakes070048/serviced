@@ -106,7 +106,7 @@ func (dfs *DistributedFilesystem) Snapshot(tenantID string) (string, error) {
 	}
 
 	// create the snapshot
-	snapshotVolume, err := dfs.getVolume(tenant)
+	snapshotVolume, err := dfs.GetVolume(tenant)
 	if err != nil {
 		glog.Errorf("Could not acquire the snapshot volume for %s (%s): %s", tenant.Name, tenant.ID, err)
 		return "", err
@@ -174,7 +174,7 @@ func (dfs *DistributedFilesystem) Rollback(snapshotID string) error {
 		return err
 	}
 
-	snapshotVolume, err := dfs.getVolume(tenant)
+	snapshotVolume, err := dfs.GetVolume(tenant)
 	if err != nil {
 		glog.Errorf("Could not find volume for service %s: %s", tenantID, err)
 		return err
@@ -218,7 +218,7 @@ func (dfs *DistributedFilesystem) ListSnapshots(tenantID string) ([]string, erro
 		return nil, err
 	}
 
-	snapshotVolume, err := dfs.getVolume(tenant)
+	snapshotVolume, err := dfs.GetVolume(tenant)
 	if err != nil {
 		glog.Errorf("Could not find volume for service %s (%s): %s", tenant.Name, tenant.ID, err)
 		return nil, err
@@ -241,7 +241,7 @@ func (dfs *DistributedFilesystem) DeleteSnapshot(snapshotID string) error {
 		return err
 	}
 
-	snapshotVolume, err := dfs.getVolume(tenant)
+	snapshotVolume, err := dfs.GetVolume(tenant)
 	if err != nil {
 		glog.Errorf("Could not find the volume for service %s (%s): %s", tenant.Name, tenant.ID, err)
 		return err
@@ -283,7 +283,7 @@ func (dfs *DistributedFilesystem) DeleteSnapshots(tenantID string) error {
 	}
 
 	// delete the snapshot subvolume
-	snapshotVolume, err := dfs.getVolume(tenant)
+	snapshotVolume, err := dfs.GetVolume(tenant)
 	if err != nil {
 		glog.Errorf("Could not find the volume for service %s (%s): %s")
 		return err
@@ -376,13 +376,15 @@ func (dfs *DistributedFilesystem) restoreServices(svcs []*service.Service) error
 			svc.ParentServiceID = parentID
 
 			// update the image
-			image, err := commons.ParseImageID(svc.ImageID)
-			if err != nil {
-				glog.Errorf("Invalid image %s for %s (%s): %s", svc.ImageID, svc.Name, svc.ID)
+			if svc.ImageID != "" {
+				image, err := commons.ParseImageID(svc.ImageID)
+				if err != nil {
+					glog.Errorf("Invalid image %s for %s (%s): %s", svc.ImageID, svc.Name, svc.ID)
+				}
+				image.Host = dfs.dockerHost
+				image.Port = dfs.dockerPort
+				svc.ImageID = image.BaseName()
 			}
-			image.Host = dfs.dockerHost
-			image.Port = dfs.dockerPort
-			svc.ImageID = image.BaseName()
 
 			// check the pool
 			if _, ok := poolMap[svc.PoolID]; !ok {

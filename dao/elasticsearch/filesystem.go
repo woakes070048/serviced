@@ -17,6 +17,8 @@ import (
 	"fmt"
 
 	"github.com/control-center/serviced/datastore"
+	"github.com/control-center/serviced/domain/service"
+	"github.com/control-center/serviced/volume"
 
 	"github.com/control-center/serviced/zzk"
 	zkSnapshot "github.com/control-center/serviced/zzk/snapshot"
@@ -24,6 +26,25 @@ import (
 
 	"errors"
 )
+
+// GetVolume gets the volume of a service
+func (this *ControlPlaneDao) GetVolume(serviceID string, volume *volume.Volume) error {
+	var tenantID string
+	if err := this.GetTenantId(serviceID, &tenantID); err != nil {
+		glog.Errorf("Could not find tenant for service %s: %s", serviceID, err)
+		return err
+	}
+
+	var tenant service.Service
+	if err := this.GetService(tenantID, &tenant); err != nil {
+		glog.Errorf("Could not find tenant %s for service %s: %s", tenantID, serviceID, err)
+		return err
+	}
+
+	var err error
+	volume, err = this.dfs.GetVolume(&tenant)
+	return err
+}
 
 // DeleteSnapshot deletes a particular snapshot
 func (this *ControlPlaneDao) DeleteSnapshot(snapshotID string, unused *int) error {

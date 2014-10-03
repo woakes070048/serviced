@@ -149,7 +149,7 @@ func NewControlSvc(hostName string, port int, facade *facade.Facade, varpath, vf
 		return nil, err
 	}
 
-	dfs, err := dfs.NewDistributedFilesystem(vfs, dockerRegistry, facade, maxdfstimeout)
+	dfs, err := dfs.NewDistributedFilesystem(vfs, varpath, dockerRegistry, facade, maxdfstimeout)
 	if err != nil {
 		return nil, err
 	}

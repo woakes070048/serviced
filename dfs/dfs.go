@@ -29,6 +29,7 @@ import (
 
 type DistributedFilesystem struct {
 	vfs        string
+	varpath    string
 	dockerHost string
 	dockerPort int
 	facade     *facade.Facade
@@ -42,7 +43,7 @@ type DistributedFilesystem struct {
 	logger *logger
 }
 
-func NewDistributedFilesystem(vfs, dockerRegistry string, facade *facade.Facade, timeout time.Duration) (*DistributedFilesystem, error) {
+func NewDistributedFilesystem(vfs, varpath, dockerRegistry string, facade *facade.Facade, timeout time.Duration) (*DistributedFilesystem, error) {
 	host, port, err := parseRegistry(dockerRegistry)
 	if err != nil {
 		return nil, err
@@ -54,7 +55,7 @@ func NewDistributedFilesystem(vfs, dockerRegistry string, facade *facade.Facade,
 	}
 	lock := zkservice.ServiceLock(conn)
 
-	return &DistributedFilesystem{vfs: vfs, dockerHost: host, dockerPort: port, facade: facade, timeout: timeout, lock: lock}, nil
+	return &DistributedFilesystem{vfs: vfs, varpath: varpath, dockerHost: host, dockerPort: port, facade: facade, timeout: timeout, lock: lock}, nil
 }
 
 func (dfs *DistributedFilesystem) Lock() error {

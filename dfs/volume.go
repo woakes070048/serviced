@@ -15,6 +15,7 @@ package dfs
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/user"
 	"path"
@@ -26,8 +27,8 @@ import (
 	"github.com/zenoss/glog"
 )
 
-func (dfs *DistributedFilesystem) getVolume(svc *service.Service) (*volume.Volume, error) {
-	v, err := getSubvolume(dfs.vfs, svc.PoolID, svc.ID)
+func (dfs *DistributedFilesystem) GetVolume(svc *service.Service) (*volume.Volume, error) {
+	v, err := getSubvolume(dfs.vfs, dfs.varpath, svc.PoolID, svc.ID)
 	if err != nil {
 		glog.Errorf("Could not acquire subvolume for service %s (%s): %s", svc.Name, svc.ID, err)
 		return nil, err
@@ -40,8 +41,8 @@ func (dfs *DistributedFilesystem) getVolume(svc *service.Service) (*volume.Volum
 	return v, nil
 }
 
-func getSubvolume(vfs, poolID, serviceID string) (*volume.Volume, error) {
-	baseDir, err := filepath.Abs(path.Join(getVarPath(), "volumes", poolID))
+func getSubvolume(vfs, varpath, poolID, serviceID string) (*volume.Volume, error) {
+	baseDir, err := filepath.Abs(path.Join(varpath, "volumes", poolID))
 	if err != nil {
 		return nil, err
 	}
@@ -49,14 +50,14 @@ func getSubvolume(vfs, poolID, serviceID string) (*volume.Volume, error) {
 	return volume.Mount(vfs, serviceID, baseDir)
 }
 
-func getVarPath() string {
+func getHome() string {
 	if servicedHome := strings.TrimSpace(os.Getenv("SERVICED_HOME")); servicedHome != "" {
-		return path.Join(servicedHome, "var")
-	} else if user, err := user.Current(); err == nil {
-		return path.Join(os.TempDir(), "serviced-"+user.Username, "var")
-	} else {
-		defaultPath := "/tmp/serviced/var"
-		glog.Warningf("Defaulting varPath to %v", defaultPath)
-		return defaultPath
+		return servicedHome
+	} else if user, err := user.Current(); err != nil {
+		return path.Join(os.TempDir(), fmt.Sprintf("serviced-%s", user.Username))
 	}
+
+	home := path.Join(os.TempDir(), "serviced")
+	glog.Warningf("Defaulting home to %s", home)
+	return home
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/control-center/serviced/domain/servicestate"
 	"github.com/control-center/serviced/domain/servicetemplate"
 	"github.com/control-center/serviced/domain/user"
+	"github.com/control-center/serviced/volume"
 	"github.com/zenoss/glog"
 )
 
@@ -190,6 +191,10 @@ func (s *ControlClient) UpdateServiceTemplate(serviceTemplate servicetemplate.Se
 
 func (s *ControlClient) RemoveServiceTemplate(serviceTemplateID string, unused *int) error {
 	return s.rpcClient.Call("ControlPlane.RemoveServiceTemplate", serviceTemplateID, unused)
+}
+
+func (s *ControlClient) GetVolume(serviceID string, volume *volume.Volume) error {
+	return s.rpcClient.Call("ControlPlane.GetVolume", serviceID, volume)
 }
 
 func (s *ControlClient) DeleteSnapshot(snapshotId string, unused *int) error {

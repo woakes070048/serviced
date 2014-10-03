@@ -48,7 +48,7 @@ func (dfs *DistributedFilesystem) Backup(dirpath string) (string, error) {
 	// get the full path of the backup
 	name := time.Now().Format("backup-2006-01-02-150405")
 	if dirpath == "" {
-		dirpath = filepath.Join(getVarPath(), "backups")
+		dirpath = filepath.Join(getHome(), "backups")
 	}
 	filename := filepath.Join(dirpath, fmt.Sprintf("%s.tgz", name))
 	dirpath = filepath.Join(dirpath, name)
@@ -160,7 +160,7 @@ func (dfs *DistributedFilesystem) Restore(filename string) error {
 		}
 	}()
 
-	dirpath := filepath.Join(getVarPath(), "restore")
+	dirpath := filepath.Join(getHome(), "restore")
 	if err := os.RemoveAll(dirpath); err != nil {
 		glog.Errorf("Could not remove %s: %s", dirpath, err)
 		return err
@@ -261,7 +261,7 @@ func (dfs *DistributedFilesystem) exportSnapshots(dirpath string, tenant *servic
 		}
 	}()
 
-	snapshotVolume, err := dfs.getVolume(tenant)
+	snapshotVolume, err := dfs.GetVolume(tenant)
 	if err != nil {
 		glog.Errorf("Could not acquire the volume for %s (%s): %s", tenant.Name, tenant.ID, err)
 		return "", err
@@ -311,7 +311,7 @@ func (dfs *DistributedFilesystem) importSnapshots(filename string) error {
 		return err
 	}
 
-	snapshotVolume, err := dfs.getVolume(tenant)
+	snapshotVolume, err := dfs.GetVolume(tenant)
 	if err != nil {
 		glog.Errorf("Could not acquire the volume for %s (%s): %s", tenant.Name, tenant.ID, err)
 		return err

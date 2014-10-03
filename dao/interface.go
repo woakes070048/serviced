@@ -22,6 +22,7 @@ import (
 	"github.com/control-center/serviced/domain/servicestate"
 	"github.com/control-center/serviced/domain/servicetemplate"
 	"github.com/control-center/serviced/domain/user"
+	"github.com/control-center/serviced/volume"
 )
 
 // A generic ControlPlane error
@@ -181,6 +182,9 @@ type ControlPlane interface {
 
 	// Return the number of layers in an image
 	ImageLayerCount(imageUUID string, layers *int) error
+
+	// Volume returns a service's volume
+	GetVolume(serviceID string, volume *volume.Volume) error
 
 	// Deletes a particular snapshot
 	DeleteSnapshot(snapshotID string, unused *int) error

@@ -190,7 +190,7 @@ func (dfs *DistributedFilesystem) importImages(dirpath string, images [][]string
 		filename := filepath.Join(dirpath, fmt.Sprintf("%d.tar", i))
 
 		// Make sure all images that refer to a local registry are named with the local registry
-		imgs := make(map[string]bool)
+		var imgs []string
 		for _, id := range tags {
 			image, err := commons.ParseImageID(id)
 			if err != nil {
@@ -199,10 +199,8 @@ func (dfs *DistributedFilesystem) importImages(dirpath string, images [][]string
 			}
 			if _, ok := tenants[image.User]; ok {
 				image.Host, image.Port = dfs.dockerHost, dfs.dockerPort
-				imgs[image.String()] = true
-			} else {
-				imgs[image.String()] = false
 			}
+			imgs = append(imgs, image.String())
 		}
 
 		if err := loadImage(filename, imgs); err != nil {
@@ -391,12 +389,12 @@ func saveImage(imageID, filename string) error {
 	return nil
 }
 
-func loadImage(filename string, imageIDs map[string]bool) error {
+func loadImage(filename string, imageIDs []string) error {
 	var images []string
 
 	var image *docker.Image
-	for id, pull := range imageIDs {
-		img, err := docker.FindImage(id, pull)
+	for _, id := range imageIDs {
+		img, err := docker.FindImage(id, false)
 
 		if err == docker.ErrNoSuchImage {
 			images = append(images, id)
