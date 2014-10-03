@@ -146,7 +146,8 @@ func (dfs *DistributedFilesystem) desynchronize(imageID commons.ImageID, commit 
 }
 
 func (dfs *DistributedFilesystem) exportImages(dirpath string, templates map[string]servicetemplate.ServiceTemplate, services []service.Service) ([][]string, error) {
-	imageTags, err := getImageTags(getImageRefs(templates, services)...)
+	tRepos, sRepos := getImageRefs(templates, services)
+	imageTags, err := getImageTags(tRepos, sRepos)
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +190,8 @@ func (dfs *DistributedFilesystem) importImages(dirpath string, images [][]string
 		filename := filepath.Join(dirpath, fmt.Sprintf("%d.tar", i))
 
 		// Make sure all images that refer to a local registry are named with the local registry
-		imgs := make([]string, len(images))
-		for i, id := range tags {
+		imgs := make(map[string]bool)
+		for _, id := range tags {
 			image, err := commons.ParseImageID(id)
 			if err != nil {
 				glog.Errorf("Could not parse %s: %s", id, err)
@@ -198,11 +199,13 @@ func (dfs *DistributedFilesystem) importImages(dirpath string, images [][]string
 			}
 			if _, ok := tenants[image.User]; ok {
 				image.Host, image.Port = dfs.dockerHost, dfs.dockerPort
+				imgs[image.String()] = true
+			} else {
+				imgs[image.String()] = false
 			}
-			imgs[i] = image.String()
 		}
 
-		if err := loadImage(filename, imgs...); err != nil {
+		if err := loadImage(filename, imgs); err != nil {
 			glog.Errorf("Error loading %s: %s", filename, err)
 			return err
 		}
@@ -263,53 +266,61 @@ func tag(tenantID, oldtag, newtag string) error {
 	return nil
 }
 
-func getImageTags(repos ...string) (map[string][]string, error) {
+func getImageTags(templateRepos []string, serviceRepos []string) (map[string][]string, error) {
 	// make a map of all docker images
 	images, err := docker.Images()
 	if err != nil {
 		return nil, err
 	}
 
-	imageMap := make(map[string]string)
+	tagmap := make(map[string][]string)
+	imap := make(map[string]string)
+
 	for _, image := range images {
-		switch image.ID.Tag {
-		case "", DockerLatest:
-			imageMap[image.ID.BaseName()] = image.UUID
-		default:
-			imageMap[image.ID.String()] = image.UUID
+
+		if image.ID.Tag == DockerLatest {
+			image.ID.Tag = ""
 		}
+		repo := image.ID.BaseName()
+		tagmap[repo] = append(tagmap[repo], image.ID.String())
+		imap[image.ID.String()] = image.UUID
 	}
 
-	// find all the tags for each matching repo
+	// Get all the tags related to a service
+	var repos []string = templateRepos
+	for _, repo := range serviceRepos {
+		imageID, err := commons.ParseImageID(repo)
+		if err != nil {
+			glog.Errorf("Invalid image %s: %s", repo, err)
+			return nil, err
+		}
+		repos = append(repos, tagmap[imageID.BaseName()]...)
+	}
+
+	// Organize repos by UUID
 	result := make(map[string][]string)
 	for _, repo := range repos {
-		if imageID, ok := imageMap[repo]; ok {
-			result[imageID] = []string{}
+		if imageID, ok := imap[repo]; ok {
+			result[imageID] = append(result[imageID], repo)
 		} else {
-			return nil, fmt.Errorf("not found: %s", repo)
-		}
-	}
-
-	for name, id := range imageMap {
-		if name == id {
-			continue
-		}
-		if tags, ok := result[id]; ok {
-			result[id] = append(tags, name)
+			err := fmt.Errorf("not found: %s", repo)
+			return nil, err
 		}
 	}
 
 	return result, nil
 }
 
-func getImageRefs(templates map[string]servicetemplate.ServiceTemplate, services []service.Service) []string {
-	var result []string
+func getImageRefs(templates map[string]servicetemplate.ServiceTemplate, services []service.Service) (t []string, s []string) {
+
+	tmap := make(map[string]struct{})
+	smap := make(map[string]struct{})
 
 	var visit func(*[]servicedefinition.ServiceDefinition)
 	visit = func(sds *[]servicedefinition.ServiceDefinition) {
 		for _, sd := range *sds {
 			if sd.ImageID != "" {
-				result = append(result, sd.ImageID)
+				tmap[sd.ImageID] = struct{}{}
 			}
 			visit(&sd.Services)
 		}
@@ -320,11 +331,19 @@ func getImageRefs(templates map[string]servicetemplate.ServiceTemplate, services
 	}
 	for _, service := range services {
 		if service.ImageID != "" {
-			result = append(result, service.ImageID)
+			smap[service.ImageID] = struct{}{}
 		}
 	}
 
-	return result
+	for r := range tmap {
+		t = append(t, r)
+	}
+
+	for r := range smap {
+		s = append(s, r)
+	}
+
+	return t, s
 }
 
 func saveImage(imageID, filename string) error {
@@ -352,7 +371,7 @@ func saveImage(imageID, filename string) error {
 
 	ctr, err := docker.NewContainer(cd, false, 10*time.Second, nil, nil)
 	if err != nil {
-		glog.Errorf("Could not create container from image %s: %v", imageID, err)
+		glog.Errorf("Could not create container from image %s.  Have you synced lately?  (serviced docker sync): %s", imageID, err)
 		return err
 	}
 
@@ -372,15 +391,15 @@ func saveImage(imageID, filename string) error {
 	return nil
 }
 
-func loadImage(filename string, imageIDs ...string) error {
-	images := make(map[string]struct{})
+func loadImage(filename string, imageIDs map[string]bool) error {
+	var images []string
 
 	var image *docker.Image
-	for _, id := range imageIDs {
-		img, err := docker.FindImage(id, false)
+	for id, pull := range imageIDs {
+		img, err := docker.FindImage(id, pull)
 
 		if err == docker.ErrNoSuchImage {
-			images[id] = struct{}{}
+			images = append(images, id)
 			continue
 		} else if err != nil {
 			glog.Errorf("Could not look up docker image %s: %s", id, err)
@@ -399,18 +418,18 @@ func loadImage(filename string, imageIDs ...string) error {
 	// image not found so import
 	if image == nil {
 		// TODO: If the docker registry changes, do we need to update the tag?
-		if err := docker.ImportImage(imageIDs[0], filename); err != nil {
+		if err := docker.ImportImage(images[0], filename); err != nil {
 			glog.Errorf("Could not import image from file %s: %s", filename, err)
 			return err
-		} else if image, err = docker.FindImage(imageIDs[0], false); err != nil {
-			glog.Errorf("Could not look up docker image %s: %s", imageIDs[0], err)
+		} else if image, err = docker.FindImage(images[0], false); err != nil {
+			glog.Errorf("Could not look up docker image %s: %s", images[0], err)
 			return err
 		}
-		delete(images, imageIDs[0])
+		images = images[1:]
 	}
 
 	// tag remaining images
-	for id := range images {
+	for _, id := range images {
 		if _, err := image.Tag(id); err != nil {
 			glog.Errorf("Could not tag image %s as %s: %s", image.UUID, id, err)
 			return err

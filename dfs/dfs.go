@@ -39,9 +39,7 @@ type DistributedFilesystem struct {
 	lock  client.Lock
 
 	// logging
-	send func(string)
-	recv func() string
-	done func()
+	logger *logger
 }
 
 func NewDistributedFilesystem(vfs, dockerRegistry string, facade *facade.Facade, timeout time.Duration) (*DistributedFilesystem, error) {
@@ -50,7 +48,7 @@ func NewDistributedFilesystem(vfs, dockerRegistry string, facade *facade.Facade,
 		return nil, err
 	}
 
-	conn, err := zzk.GetLocalConnection(zzk.GeneratePoolPath("/"))
+	conn, err := zzk.GetLocalConnection("/")
 	if err != nil {
 		return nil, err
 	}
@@ -66,37 +64,36 @@ func (dfs *DistributedFilesystem) Lock() error {
 	if err != nil {
 		glog.Warningf("Could not lock services! Operation may be unstable: %s", err)
 	}
-
-	dfs.send, dfs.recv, dfs.done = stream()
+	dfs.logger = new(logger).init()
 	return err
 }
 
 func (dfs *DistributedFilesystem) Unlock() error {
 	defer dfs.mutex.Unlock()
-	dfs.done()
-	dfs.send, dfs.recv, dfs.done = nil, nil, nil
+	dfs.logger.Done()
+	dfs.logger = nil
 	return dfs.lock.Unlock()
 }
 
 func (dfs *DistributedFilesystem) IsLocked() (bool, error) {
-	conn, err := zzk.GetLocalConnection(zzk.GeneratePoolPath("/"))
+	conn, err := zzk.GetLocalConnection("/")
 	if err != nil {
 		return false, err
 	}
 	return zkservice.IsServiceLocked(conn)
 }
 
-func (dfs *DistributedFilesystem) GetStatus() string {
-	if dfs.recv != nil {
-		return dfs.recv()
+func (dfs *DistributedFilesystem) GetStatus(timeout time.Duration) string {
+	if dfs.logger != nil {
+		return dfs.logger.Recv(timeout)
 	}
-	return "EOF"
+	return ""
 }
 
 func (dfs *DistributedFilesystem) log(msg string, argv ...interface{}) {
-	defer glog.V(1).Infof(msg, argv...)
-	if dfs.send != nil {
-		dfs.send(fmt.Sprintf(msg, argv...))
+	defer glog.V(0).Infof(msg, argv...)
+	if dfs.logger != nil {
+		dfs.logger.Send(fmt.Sprintf(msg, argv...))
 	}
 }
 
@@ -113,40 +110,66 @@ func parseRegistry(registry string) (host string, port int, err error) {
 	return host, port, nil
 }
 
-func stream() (send func(string), recv func() string, done func()) {
-	var messages = make(chan string)
-	var q []string
-	var mutex sync.Mutex
-	var empty sync.WaitGroup
+type logger struct {
+	messages chan string
+	q        []string
+	mutex    sync.Mutex
+	empty    sync.WaitGroup
+}
 
-	empty.Add(1)
-	go func() {
-		for {
-			m, ok := <-messages
-			if !ok {
-				return
-			}
+func (l *logger) init() *logger {
+	l = &logger{messages: make(chan string)}
+	l.empty.Add(1)
+	go l.stream()
+	return l
+}
 
-			mutex.Lock()
-			q = append(q, m)
-			if len(q) == 1 {
-				empty.Done()
-			}
-			mutex.Unlock()
+func (l *logger) stream() {
+	for {
+		m, ok := <-l.messages
+		if !ok {
+			return
 		}
+
+		l.mutex.Lock()
+		l.q = append(l.q, m)
+		if len(l.q) == 1 {
+			l.empty.Done()
+		}
+		l.mutex.Unlock()
+	}
+}
+
+func (l *logger) Send(m string) {
+	l.messages <- m
+}
+
+func (l *logger) Recv(timeout time.Duration) string {
+	ready := make(chan struct{})
+
+	go func() {
+		defer close(ready)
+		l.empty.Wait()
 	}()
 
-	send = func(m string) { messages <- m }
-	recv = func() string {
-		empty.Wait()
-		mutex.Lock()
-		defer mutex.Unlock()
-		defer func() {
-			q = make([]string, 0)
-			empty.Add(1)
-		}()
-		return q[len(q)-1]
+	select {
+	case <-time.After(timeout):
+		return "timeout"
+	case <-ready:
 	}
-	done = func() { close(messages) }
-	return send, recv, done
+
+	if len(l.q) == 0 {
+		return "EOF"
+	}
+
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	msg := l.q[len(l.q)-1]
+	l.q = make([]string, 0)
+	l.empty.Add(1)
+	return msg
+}
+
+func (l *logger) Done() {
+	close(l.messages)
 }

@@ -46,10 +46,12 @@ func (dfs *DistributedFilesystem) Backup(dirpath string) (string, error) {
 	dfs.log("Starting backup")
 
 	// get the full path of the backup
-	filename := time.Now().Format("backup-2006-01-02-150405.tgz")
+	name := time.Now().Format("backup-2006-01-02-150405")
 	if dirpath == "" {
 		dirpath = filepath.Join(getVarPath(), "backups")
 	}
+	filename := filepath.Join(dirpath, fmt.Sprintf("%s.tgz", name))
+	dirpath = filepath.Join(dirpath, name)
 
 	if err := mkdir(dirpath); err != nil {
 		glog.Errorf("Could neither find nor create %s: %v", dirpath, err)

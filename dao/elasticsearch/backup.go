@@ -21,10 +21,19 @@ import (
 	"time"
 )
 
-var backupError chan error
+var backupError = make(chan error)
 
 // Backup saves templates, services, and snapshots into a tgz file
 func (this *ControlPlaneDao) Backup(dirpath string, filename *string) error {
+	this.dfs.Lock()
+	defer this.dfs.Unlock()
+	var err error
+	*filename, err = this.dfs.Backup(dirpath)
+	return err
+}
+
+// AsyncBackup performs the backup asynchronously
+func (this *ControlPlaneDao) AsyncBackup(dirpath string, filename *string) error {
 	// TODO: There is a risk of contention here if two backup operations are
 	// called simultaneously. We may want to move backups into a leader queue
 	// on the coordinator.
@@ -37,27 +46,26 @@ func (this *ControlPlaneDao) Backup(dirpath string, filename *string) error {
 		return err
 	}
 
-	this.dfs.Lock()
-	defer this.dfs.Unlock()
-	var err error
-	*filename, err = this.dfs.Backup(dirpath)
-	return err
-}
-
-// AsyncBackup performs the backup asynchronously
-func (this *ControlPlaneDao) AsyncBackup(dirpath string, filename *string) error {
-	backupError = make(chan error)
 	go func() {
-		defer close(backupError)
-		if err := this.Backup(dirpath, filename); err != nil {
-			backupError <- err
-		}
+		err := this.Backup(dirpath, filename)
+		backupError <- err
 	}()
+
 	return nil
 }
 
 // Restore restores a serviced installation to the state of its backup
 func (this *ControlPlaneDao) Restore(filename string, unused *int) error {
+	this.dfs.Lock()
+	defer this.dfs.Unlock()
+	return this.dfs.Restore(filename)
+}
+
+// AsyncRestore performs the restore aynchronously
+func (this *ControlPlaneDao) AsyncRestore(filename string, unused *int) error {
+	// TODO: There is a risk of contention here if two backup operations are
+	// called simultaneously. We may want to move backups into a leader queue
+	// on the coordinator.
 	if locked, err := this.dfs.IsLocked(); err != nil {
 		glog.Errorf("Could not check lock on dfs: %s", err)
 		return err
@@ -67,19 +75,9 @@ func (this *ControlPlaneDao) Restore(filename string, unused *int) error {
 		return err
 	}
 
-	this.dfs.Lock()
-	defer this.dfs.Unlock()
-	return this.dfs.Restore(filename)
-}
-
-// AsyncRestore performs the restore aynchronously
-func (this *ControlPlaneDao) AsyncRestore(filename string, unused *int) error {
-	backupError = make(chan error)
 	go func() {
-		defer close(backupError)
-		if err := this.Restore(filename, unused); err != nil {
-			backupError <- err
-		}
+		err := this.Restore(filename, unused)
+		backupError <- err
 	}()
 	return nil
 }
@@ -87,11 +85,9 @@ func (this *ControlPlaneDao) AsyncRestore(filename string, unused *int) error {
 // BackupStatus monitors the status of a backup or restore
 func (this *ControlPlaneDao) BackupStatus(unused int, status *string) error {
 	message := make(chan string)
-	go func() { message <- this.dfs.GetStatus() }()
+	go func() { message <- this.dfs.GetStatus(10 * time.Second) }()
 	select {
 	case *status = <-message:
-	case <-time.After(10 * time.Second):
-		*status = "timeout"
 	case err := <-backupError:
 		return err
 	}

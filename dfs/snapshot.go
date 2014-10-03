@@ -452,27 +452,27 @@ func parseLabel(snapshotID string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func getChildServices(tenantID string, svcs []service.Service) []*service.Service {
-	var result []*service.Service
+func getChildServices(tenantID string, svcs []service.Service) []service.Service {
+	var result []service.Service
 
-	svcMap := make(map[string][]*service.Service)
+	svcMap := make(map[string][]service.Service)
 	for _, svc := range svcs {
 		if svc.ID == tenantID {
-			result = append(result, &svc)
+			result = append(result, svc)
 		} else {
 			childSvcs := svcMap[svc.ParentServiceID]
-			svcMap[svc.ParentServiceID] = append(childSvcs, &svc)
+			svcMap[svc.ParentServiceID] = append(childSvcs, svc)
 		}
 	}
 
 	var walk func(root string)
 	walk = func(root string) {
 		for _, svc := range svcMap[root] {
+			result = append(result, svc)
 			walk(svc.ID)
 		}
-		result = append(result, svcMap[root]...)
 	}
-
+	walk(tenantID)
 	return result
 }
 
@@ -511,9 +511,8 @@ func importJSON(filename string, v interface{}) error {
 		}
 	}()
 
-	var svcs []service.Service
 	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&svcs); err != nil {
+	if err := decoder.Decode(v); err != nil {
 		glog.Errorf("Could not read JSON data from %s: %s", filename, err)
 		return err
 	}
