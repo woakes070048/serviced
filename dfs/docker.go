@@ -271,7 +271,8 @@ func getImageTags(templateRepos []string, serviceRepos []string) (map[string][]s
 		return nil, err
 	}
 
-	tagmap := make(map[string][]string)
+	// TODO: enable tagmap if we are storing all snapshots in a backup
+	// tagmap := make(map[string][]string)
 	imap := make(map[string]string)
 
 	for _, image := range images {
@@ -279,21 +280,26 @@ func getImageTags(templateRepos []string, serviceRepos []string) (map[string][]s
 		if image.ID.Tag == DockerLatest {
 			image.ID.Tag = ""
 		}
-		repo := image.ID.BaseName()
-		tagmap[repo] = append(tagmap[repo], image.ID.String())
+		// repo := image.ID.BaseName()
+		// tagmap[repo] = append(tagmap[repo], image.ID.String())
 		imap[image.ID.String()] = image.UUID
 	}
 
+	repos := append(templateRepos, serviceRepos...)
+
+	// TODO: Enable this if we are storing all snapshots in a backup
 	// Get all the tags related to a service
-	var repos []string = templateRepos
-	for _, repo := range serviceRepos {
-		imageID, err := commons.ParseImageID(repo)
-		if err != nil {
-			glog.Errorf("Invalid image %s: %s", repo, err)
-			return nil, err
+	/*
+		repos := templateRepos
+		for _, repo := range serviceRepos {
+			imageID, err := commons.ParseImageID(repo)
+			if err != nil {
+				glog.Errorf("Invalid image %s: %s", repo, err)
+				return nil, err
+			}
+			repos = append(repos, tagmap[imageID.BaseName()]...)
 		}
-		repos = append(repos, tagmap[imageID.BaseName()]...)
-	}
+	*/
 
 	// Organize repos by UUID
 	result := make(map[string][]string)
@@ -310,7 +316,6 @@ func getImageTags(templateRepos []string, serviceRepos []string) (map[string][]s
 }
 
 func getImageRefs(templates map[string]servicetemplate.ServiceTemplate, services []service.Service) (t []string, s []string) {
-
 	tmap := make(map[string]struct{})
 	smap := make(map[string]struct{})
 
