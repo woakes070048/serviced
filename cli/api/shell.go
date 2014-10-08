@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/commons/layer"
+	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/domain/service"
 	"github.com/control-center/serviced/node"
 	"github.com/control-center/serviced/shell"
@@ -48,21 +48,31 @@ type ShellConfig struct {
 
 // getServiceBindMounts retrieves a service's bindmounts
 func getServiceBindMounts(lbClientPort string, serviceID string) (map[string]string, error) {
-	client, err := node.NewLBClient(lbClientPort)
+	var bindmounts map[string]string
+
+	agentClient, err := node.NewLBClient(lbClientPort)
 	if err != nil {
 		glog.Errorf("Could not create a client to endpoint: %s, %s", lbClientPort, err)
 		return nil, err
 	}
-	defer client.Close()
 
-	var bindmounts map[string]string
-	err = client.GetServiceBindMounts(serviceID, &bindmounts)
-	if err != nil {
-		glog.Errorf("Error getting service %s's bindmounts, error: %s", serviceID, err)
-		return nil, err
+	if err := agentClient.GetServiceBindMounts(serviceID, &bindmounts); err != nil {
+		if strings.HasPrefix(err.Error(), "rpc: can't find service") {
+			masterClient, err := node.NewControlClient(lbClientPort)
+			if err != nil {
+				glog.Errorf("Could not create a client to endpoint %s: %s", lbClientPort, err)
+				return nil, err
+			}
+			if err := masterClient.GetServiceBindMounts(serviceID, &bindmounts); err != nil {
+				glog.Errorf("Error getting bindings for %s: %s", serviceID, err)
+				return nil, err
+			}
+		} else {
+			glog.Errorf("Error getting bindings for %s: %s", serviceID, err)
+			return nil, err
+		}
 	}
 
-	glog.V(1).Infof("getServiceBindMounts: service id=%s: %s", serviceID, bindmounts)
 	return bindmounts, nil
 }
 

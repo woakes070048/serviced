@@ -25,7 +25,7 @@ import (
 	"github.com/control-center/serviced/commons/docker"
 	"github.com/control-center/serviced/coordinator/client"
 	"github.com/control-center/serviced/dao"
-	"github.com/control-center/serviced/datastore"
+	"github.com/control-center/serviced/domain/pool"
 	"github.com/control-center/serviced/domain/service"
 	"github.com/control-center/serviced/zzk"
 	zkservice "github.com/control-center/serviced/zzk/service"
@@ -38,19 +38,19 @@ const timeFormat = "20060102-150405"
 // given service ID
 func (dfs *DistributedFilesystem) Snapshot(tenantID string) (string, error) {
 	// Get the tenant (parent) service
-	tenant, err := dfs.facade.GetService(datastore.Get(), tenantID)
-	if err != nil {
+	var tenant service.Service
+	if err := dfs.client.GetService(tenantID, &tenant); err != nil {
 		glog.Errorf("Could not get service %s: %s", tenantID, err)
 		return "", err
-	} else if tenant == nil {
+	} else if tenant.ID == "" {
 		err = fmt.Errorf("service not found")
 		glog.Errorf("Service %s not found", tenantID)
 		return "", err
 	}
 
 	// Pause all running services
-	svcs, err := dfs.facade.GetServices(datastore.Get(), dao.ServiceRequest{})
-	if err != nil {
+	var svcs []service.Service
+	if err := dfs.client.GetServices(dao.ServiceRequest{}, &svcs); err != nil {
 		glog.Errorf("Could not get all services: %s", err)
 		return "", err
 	}
@@ -66,7 +66,7 @@ func (dfs *DistributedFilesystem) Snapshot(tenantID string) (string, error) {
 
 	for _, svc := range svcs {
 		if svc.DesiredState == service.SVCRun {
-			defer dfs.facade.StartService(datastore.Get(), svc.ID)
+			defer dfs.client.StartService(svc.ID, new(string))
 			processing[svc.ID] = struct{}{}
 
 			go func(poolID, serviceID string) {
@@ -98,7 +98,7 @@ func (dfs *DistributedFilesystem) Snapshot(tenantID string) (string, error) {
 			case obj := <-done:
 				delete(processing, obj.id)
 				if obj.err != nil {
-					return err
+					return obj.err
 				}
 			case <-timeout:
 				return fmt.Errorf("request timed out")
@@ -150,8 +150,8 @@ func (dfs *DistributedFilesystem) Rollback(snapshotID string) error {
 	}
 
 	// fail if any services are running
-	svcs, err := dfs.facade.GetServices(datastore.Get(), dao.ServiceRequest{})
-	if err != nil {
+	var svcs []service.Service
+	if err := dfs.client.GetServices(dao.ServiceRequest{}, &svcs); err != nil {
 		glog.Errorf("Could not acquire the list of all services: %s", err)
 		return err
 	}
@@ -173,11 +173,11 @@ func (dfs *DistributedFilesystem) Rollback(snapshotID string) error {
 	}
 
 	// check the snapshot
-	tenant, err := dfs.facade.GetService(datastore.Get(), tenantID)
-	if err != nil {
+	var tenant service.Service
+	if err := dfs.client.GetService(tenantID, &tenant); err != nil {
 		glog.Errorf("Could not find service %s: %s", tenantID, err)
 		return err
-	} else if tenant == nil {
+	} else if tenant.ID == "" {
 		glog.Errorf("Service %s not found", tenantID)
 		return fmt.Errorf("service not found")
 	}
@@ -220,11 +220,11 @@ func (dfs *DistributedFilesystem) Rollback(snapshotID string) error {
 // ListSnapshots lists all the snapshots for a particular tenant
 func (dfs *DistributedFilesystem) ListSnapshots(tenantID string) ([]string, error) {
 	// Get the tenant (parent) service
-	tenant, err := dfs.facade.GetService(datastore.Get(), tenantID)
-	if err != nil {
+	var tenant service.Service
+	if err := dfs.client.GetService(tenantID, &tenant); err != nil {
 		glog.Errorf("Could not get service %s: %s", tenantID, err)
 		return nil, err
-	} else if tenant == nil {
+	} else if tenant.ID == "" {
 		glog.Errorf("Service %s not found", tenantID)
 		return nil, fmt.Errorf("service not found")
 	}
@@ -246,11 +246,11 @@ func (dfs *DistributedFilesystem) DeleteSnapshot(snapshotID string) error {
 		return err
 	}
 
-	tenant, err := dfs.facade.GetService(datastore.Get(), tenantID)
-	if err != nil {
+	var tenant service.Service
+	if err := dfs.client.GetService(tenantID, &tenant); err != nil {
 		glog.Errorf("Service not found %s: %s", tenantID, err)
 		return err
-	} else if tenant == nil {
+	} else if tenant.ID == "" {
 		glog.Errorf("Service %s not found", tenantID)
 		return fmt.Errorf("service not found")
 	}
@@ -318,7 +318,7 @@ func (dfs *DistributedFilesystem) DeleteSnapshots(tenantID string) error {
 }
 
 func (dfs *DistributedFilesystem) pause(cancel <-chan interface{}, conn client.Connection, serviceID string) error {
-	if err := dfs.facade.PauseService(datastore.Get(), serviceID); err != nil {
+	if err := dfs.client.PauseService(serviceID, new(string)); err != nil {
 		return err
 	}
 
@@ -344,8 +344,8 @@ func (dfs *DistributedFilesystem) pause(cancel <-chan interface{}, conn client.C
 
 func (dfs *DistributedFilesystem) restoreServices(svcs []*service.Service) error {
 	// get the resource pools
-	pools, err := dfs.facade.GetResourcePools(datastore.Get())
-	if err != nil {
+	var pools []pool.ResourcePool
+	if err := dfs.client.GetResourcePools(0, &pools); err != nil {
 		return err
 	}
 	poolMap := make(map[string]struct{})
@@ -360,8 +360,8 @@ func (dfs *DistributedFilesystem) restoreServices(svcs []*service.Service) error
 	}
 
 	// map service id to service
-	current, err := dfs.facade.GetServices(datastore.Get(), dao.ServiceRequest{})
-	if err != nil {
+	var current []service.Service
+	if err := dfs.client.GetServices(dao.ServiceRequest{}, &current); err != nil {
 		glog.Errorf("Could not get services: %s", err)
 		return err
 	}
@@ -398,13 +398,13 @@ func (dfs *DistributedFilesystem) restoreServices(svcs []*service.Service) error
 			}
 
 			if _, ok := currentServices[serviceID]; ok {
-				if err := dfs.facade.UpdateService(datastore.Get(), svc); err != nil {
+				if err := dfs.client.UpdateService(svc, new(int)); err != nil {
 					glog.Errorf("Could not update service %s: %s", svc.ID, err)
 					return err
 				}
 				delete(currentServices, serviceID)
 			} else {
-				if err := dfs.facade.AddService(datastore.Get(), svc); err != nil {
+				if err := dfs.client.AddService(svc, new(string)); err != nil {
 					glog.Errorf("Could not add service %s: %s", serviceID, err)
 					return err
 				}

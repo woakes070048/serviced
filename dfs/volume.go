@@ -22,12 +22,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/control-center/serviced/domain/service"
 	"github.com/control-center/serviced/volume"
 	"github.com/zenoss/glog"
 )
 
 func (dfs *DistributedFilesystem) GetVolume(serviceID string) (*volume.Volume, error) {
-	v, err := GetSubvolume(dfs.vfs, dfs.varpath, serviceID)
+	v, err := getSubvolume(dfs.vfs, dfs.varpath, serviceID)
 	if err != nil {
 		glog.Errorf("Could not acquire subvolume for service %s: %s", serviceID, err)
 		return nil, err
@@ -40,8 +41,31 @@ func (dfs *DistributedFilesystem) GetVolume(serviceID string) (*volume.Volume, e
 	return v, nil
 }
 
-// GetSubvolume gets the path of the *local* volume on the host
-func GetSubvolume(vfs, varpath, serviceID string) (*volume.Volume, error) {
+func (dfs *DistributedFilesystem) GetBindMounts(svc *service.Service, source *volume.Volume) (map[string]string, error) {
+	bindmounts := make(map[string]string)
+	for _, volume := range svc.Volumes {
+		if !(volume.Type == "" || volume.Type == "dfs") {
+			continue
+		}
+
+		resourcepath := filepath.Join(source.Path(), volume.ResourcePath)
+		if err := os.MkdirAll(resourcepath, 0770); err != nil {
+			glog.Errorf("Could not create resource path %s for %s (%s): %s", resourcepath, svc.Name, svc.ID)
+			return nil, err
+		}
+
+		if err := bindcopy(resourcepath, volume.ContainerPath, svc.ImageID, volume.Owner, volume.Permission); err != nil {
+			glog.Errorf("Error populating resource path (%s) with container path (%s): %s", resourcepath, volume.ContainerPath, err)
+			return nil, err
+		}
+
+		bindmounts[resourcepath] = volume.ContainerPath
+	}
+
+	return bindmounts, nil
+}
+
+func getSubvolume(vfs, varpath, serviceID string) (*volume.Volume, error) {
 	baseDir, err := filepath.Abs(path.Join(varpath, "volumes"))
 	if err != nil {
 		return nil, err

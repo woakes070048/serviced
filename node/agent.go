@@ -26,7 +26,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,11 +45,9 @@ import (
 	"github.com/control-center/serviced/domain/host"
 	"github.com/control-center/serviced/domain/pool"
 	"github.com/control-center/serviced/domain/service"
-	"github.com/control-center/serviced/domain/servicedefinition"
 	"github.com/control-center/serviced/domain/servicestate"
 	"github.com/control-center/serviced/domain/user"
 	"github.com/control-center/serviced/proxy"
-	"github.com/control-center/serviced/rpc/master"
 	"github.com/control-center/serviced/utils"
 	"github.com/control-center/serviced/zzk"
 	zkdocker "github.com/control-center/serviced/zzk/docker"
@@ -73,19 +70,26 @@ const (
 
 // HostAgent is an instance of the control center Agent.
 type HostAgent struct {
+	/*
+		varPath              string               // directory to store serviced	 data
+		vfs                  string               // driver for container volumes
+		currentServices      map[string]*exec.Cmd // the current running services
+		mux                  *proxy.TCPMux
+		zkClient             *coordclient.Client
+		dockerRegistry       string        // the docker registry to use
+	*/
+
+	hostID        string // the hostID of the current host
+	client        *ControlClient
+	zkClient      *coordclient.Client
+	dfs           *dfs.DistributedFilesystem
+	proxyRegistry proxy.ProxyRegistry
+
 	poolID               string
-	master               string               // the connection string to the master agent
-	uiport               string               // the port to the ui (legacy was port 8787, now default 443)
-	hostID               string               // the hostID of the current host
-	dockerDNS            []string             // docker dns addresses
-	varPath              string               // directory to store serviced	 data
-	mount                []string             // each element is in the form: dockerImage,hostPath,containerPath
-	vfs                  string               // driver for container volumes
-	currentServices      map[string]*exec.Cmd // the current running services
-	mux                  *proxy.TCPMux
-	proxyRegistry        proxy.ProxyRegistry
-	zkClient             *coordclient.Client
-	dockerRegistry       string        // the docker registry to use
+	master               string        // the connection string to the master agent
+	uiport               string        // the port to the ui (legacy was port 8787, now default 443)
+	mount                []string      // each element is in the form: dockerImage,hostPath,containerPath
+	dockerDNS            []string      // docker dns addresses
 	maxContainerAge      time.Duration // maximum age for a stopped container before it is removed
 	virtualAddressSubnet string        // subnet for virtual addresses
 }
@@ -120,62 +124,56 @@ type AgentOptions struct {
 	Mux                  *proxy.TCPMux
 	DockerRegistry       string
 	MaxContainerAge      time.Duration // Maximum container age for a stopped container before being removed
+	MaxDFSTimeout        time.Duration // Max timeout for dfs operations
 	VirtualAddressSubnet string
 }
 
-// NewHostAgent creates a new HostAgent given a connection string
-func NewHostAgent(options AgentOptions) (*HostAgent, error) {
-	// save off the arguments
-	agent := &HostAgent{}
-	agent.dockerRegistry = options.DockerRegistry
-	agent.poolID = options.PoolID
-	agent.master = options.Master
-	agent.uiport = options.UIPort
-	agent.dockerDNS = options.DockerDNS
-	agent.varPath = options.VarPath
-	agent.mount = options.Mount
-	agent.vfs = options.VFS
-	agent.mux = options.Mux
-	agent.maxContainerAge = options.MaxContainerAge
-	agent.virtualAddressSubnet = options.VirtualAddressSubnet
-
-	dsn := getZkDSN(options.Zookeepers)
-	basePath := ""
-	zkClient, err := coordclient.New("zookeeper", dsn, basePath, nil)
+func Connect(options AgentOptions) (*ControlClient, *coordclient.Client, error) {
+	// open connection to master
+	client, err := NewControlClient(options.Master)
 	if err != nil {
-		return nil, err
+		glog.Errorf("Could not connect to master %s: %s", options.Master, err)
+		return nil, nil, err
 	}
+
+	// open connection to zookeeper
+	dsn := getZkDSN(options.Zookeepers)
+	zkClient, err := coordclient.New("zookeeper", dsn, "", nil)
+	if err != nil {
+		defer client.Close()
+		glog.Errorf("Could not connect to zookeeper %s: %s", dsn, err)
+		return nil, nil, err
+	}
+
+	return client, zkClient, nil
+}
+
+func NewHostAgent(options AgentOptions, masterClient *ControlClient, zkClient *coordclient.Client) (*HostAgent, error) {
+	agent := &HostAgent{
+		poolID:               options.PoolID,
+		master:               options.Master,
+		uiport:               options.UIPort,
+		mount:                options.Mount,
+		dockerDNS:            options.DockerDNS,
+		maxContainerAge:      options.MaxContainerAge,
+		virtualAddressSubnet: options.VirtualAddressSubnet,
+	}
+	agent.client = masterClient
 	agent.zkClient = zkClient
 
-	hostID, err := utils.HostID()
+	var err error
+	agent.hostID, err = utils.HostID()
 	if err != nil {
-		panic("Could not get hostid")
+		panic(fmt.Sprintf("could not get hostID: %s", err))
 	}
-	agent.hostID = hostID
-	agent.currentServices = make(map[string]*exec.Cmd)
-
+	agent.dfs, err = dfs.NewDistributedFilesystem(options.VFS, options.VarPath, options.DockerRegistry, masterClient, options.MaxDFSTimeout)
+	if err != nil {
+		glog.Errorf("Could not initialize DFS: %s", err)
+		return nil, err
+	}
 	agent.proxyRegistry = proxy.NewDefaultProxyRegistry()
-	return agent, err
 
-	/* FIXME: this should work here
-
-	addr, err := net.ResolveTCPAddr("tcp", processForwarderAddr)
-	if err != nil {
-		return nil, err
-	}
-	listener, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-
-	sio := shell.NewProcessForwarderServer(proxyOptions.servicedEndpoint)
-	sio.Handle("/", http.FileServer(http.Dir("/serviced/www/")))
-	go http.Serve(listener, sio)
-	c := &ControllerP{
-		processForwarderListener: listener,
-	}
-	*/
-
+	return agent, nil
 }
 
 // Use the Context field of the given template to fill in all the templates in
@@ -355,13 +353,6 @@ func chownConfFile(filename, owner, permissions string, dockerImage string) erro
 // StartService starts a new instance of the specified service and updates the control center state accordingly.
 func (a *HostAgent) StartService(done chan<- interface{}, svc *service.Service, state *servicestate.ServiceState) error {
 	glog.V(2).Infof("About to start service %s with name %s", svc.ID, svc.Name)
-	client, err := NewControlClient(a.master)
-	if err != nil {
-		glog.Errorf("Could not start ControlPlane client %v", err)
-		return err
-	}
-	defer client.Close()
-
 	// start from a known good state
 	if state.DockerID != "" {
 		if ctr, err := docker.FindContainer(state.DockerID); err != nil {
@@ -372,7 +363,7 @@ func (a *HostAgent) StartService(done chan<- interface{}, svc *service.Service, 
 	}
 
 	// create the docker client Config and HostConfig structures necessary to create and start the service
-	config, hostconfig, err := configureContainer(a, client, svc, state, a.virtualAddressSubnet)
+	config, hostconfig, err := configureContainer(a, svc, state, a.virtualAddressSubnet)
 	if err != nil {
 		glog.Errorf("can't configure container: %v", err)
 		return err
@@ -487,23 +478,15 @@ func updateInstance(state *servicestate.ServiceState, ctr *docker.Container) err
 // configureContainer creates and populates two structures, a docker client Config and a docker client HostConfig structure
 // that are used to create and start a container respectively. The information used to populate the structures is pulled from
 // the service, serviceState, and conn values that are passed into configureContainer.
-func configureContainer(a *HostAgent, client *ControlClient,
-	svc *service.Service, serviceState *servicestate.ServiceState,
+func configureContainer(a *HostAgent, svc *service.Service, serviceState *servicestate.ServiceState,
 	virtualAddressSubnet string) (*dockerclient.Config, *dockerclient.HostConfig, error) {
 	cfg := &dockerclient.Config{}
 	hcfg := &dockerclient.HostConfig{}
 
-	//get this service's tenantId for volume mapping
-	var tenantID string
-	err := client.GetTenantId(svc.ID, &tenantID)
-	if err != nil {
-		glog.Errorf("Failed getting tenantID for service: %s, %s", svc.ID, err)
-	}
-
 	// get the system user
 	unused := 0
 	systemUser := user.User{}
-	err = client.GetSystemUser(unused, &systemUser)
+	err := a.client.GetSystemUser(unused, &systemUser)
 	if err != nil {
 		glog.Errorf("Unable to get system user account for agent %s", err)
 	}
@@ -547,7 +530,13 @@ func configureContainer(a *HostAgent, client *ControlClient,
 		}
 	}
 
-	if len(tenantID) == 0 && len(svc.Volumes) > 0 {
+	var tenantID string
+	if err := a.GetTenantId(svc.ID, &tenantID); err != nil {
+		glog.Errorf("Could not find tenant for service %s (%s): %s", svc.Name, svc.ID, err)
+		return nil, nil, err
+	}
+
+	if tenantID == "" && len(svc.Volumes) > 0 {
 		// FIXME: find a better way of handling this error condition
 		glog.Fatalf("Could not get tenant ID and need to mount a volume, service state: %s, service id: %s", serviceState.ID, svc.ID)
 	}
@@ -558,27 +547,24 @@ func configureContainer(a *HostAgent, client *ControlClient,
 		return nil, nil, err
 	}
 
-	cfg.Volumes = make(map[string]struct{})
-	hcfg.Binds = []string{}
-
-	if err := injectContext(svc, serviceState, client); err != nil {
+	if err := injectContext(svc, serviceState, a.client); err != nil {
 		glog.Errorf("Error injecting context: %s", err)
 		return nil, nil, err
 	}
 
-	for _, volume := range svc.Volumes {
-		if volume.Type != "" && volume.Type != "dfs" {
-			continue
-		}
+	var bindings map[string]string
+	if err := a.GetServiceBindMounts(svc.ID, &bindings); err != nil {
+		glog.Errorf("Could not set up bind mounts for %s (%s): %s", svc.Name, svc.ID, err)
+		return nil, nil, err
+	}
 
-		resourcePath, err := a.setupVolume(tenantID, svc, volume)
-		if err != nil {
-			glog.Fatalf("%s", err)
-		}
+	cfg.Volumes = make(map[string]struct{})
+	hcfg.Binds = []string{}
 
-		binding := fmt.Sprintf("%s:%s", resourcePath, volume.ContainerPath)
-		cfg.Volumes[strings.Split(binding, ":")[1]] = struct{}{}
-		hcfg.Binds = append(hcfg.Binds, strings.TrimSpace(binding))
+	for hostPath, containerPath := range bindings {
+		binding := fmt.Sprintf("%s:%s", hostPath, containerPath)
+		cfg.Volumes[containerPath] = struct{}{}
+		hcfg.Binds = append(hcfg.Binds, binding)
 	}
 
 	dir, binary, err := ExecPath()
@@ -586,6 +572,7 @@ func configureContainer(a *HostAgent, client *ControlClient,
 		glog.Errorf("Error getting exec path: %v", err)
 		return nil, nil, err
 	}
+
 	volumeBinding := fmt.Sprintf("%s:/serviced", dir)
 	cfg.Volumes[strings.Split(volumeBinding, ":")[1]] = struct{}{}
 	hcfg.Binds = append(hcfg.Binds, strings.TrimSpace(volumeBinding))
@@ -722,40 +709,12 @@ func configureContainer(a *HostAgent, client *ControlClient,
 	return cfg, hcfg, nil
 }
 
-// setupVolume
-func (a *HostAgent) setupVolume(tenantID string, service *service.Service, volume servicedefinition.Volume) (string, error) {
-	glog.V(4).Infof("setupVolume for service Name:%s ID:%s", service.Name, service.ID)
-	sv, err := dfs.GetSubvolume(a.vfs, a.varPath, tenantID)
-	if err != nil {
-		return "", fmt.Errorf("Could not create subvolume: %s", err)
-	}
-
-	resourcePath := path.Join(sv.Path(), volume.ResourcePath)
-	if err = os.MkdirAll(resourcePath, 0770); err != nil {
-		return "", fmt.Errorf("Could not create resource path: %s, %s", resourcePath, err)
-	}
-
-	if err := createVolumeDir(resourcePath, volume.ContainerPath, service.ImageID, volume.Owner, volume.Permission); err != nil {
-		glog.Errorf("Error populating resource path: %s with container path: %s, %v", resourcePath, volume.ContainerPath, err)
-	}
-
-	glog.V(4).Infof("resourcePath: %s  containerPath: %s", resourcePath, volume.ContainerPath)
-	return resourcePath, nil
-}
-
 func (a *HostAgent) GetHost(hostID string) (*host.Host, error) {
-	rpcMaster, err := master.NewClient(a.master)
-	if err != nil {
-		glog.Errorf("Failed to get RPC master: %v", err)
+	var host host.Host
+	if err := a.client.GetHost(hostID, &host); err != nil {
 		return nil, err
 	}
-	defer rpcMaster.Close()
-	myHost, err := rpcMaster.GetHost(hostID)
-	if err != nil {
-		glog.Errorf("Could not get host %s: %s", hostID, err)
-		return nil, err
-	}
-	return myHost, nil
+	return &host, nil
 }
 
 // main loop of the HostAgent

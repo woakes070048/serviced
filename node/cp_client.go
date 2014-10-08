@@ -26,11 +26,12 @@ import (
 	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/domain"
 	"github.com/control-center/serviced/domain/addressassignment"
+	"github.com/control-center/serviced/domain/host"
+	"github.com/control-center/serviced/domain/pool"
 	"github.com/control-center/serviced/domain/service"
 	"github.com/control-center/serviced/domain/servicestate"
 	"github.com/control-center/serviced/domain/servicetemplate"
 	"github.com/control-center/serviced/domain/user"
-	"github.com/control-center/serviced/volume"
 	"github.com/zenoss/glog"
 )
 
@@ -59,6 +60,14 @@ func NewControlClient(addr string) (s *ControlClient, err error) {
 // Return the matching hosts.
 func (s *ControlClient) Close() (err error) {
 	return s.rpcClient.Close()
+}
+
+func (s *ControlClient) GetResourcePools(unused int, pools *[]pool.ResourcePool) error {
+	return s.rpcClient.Call("ControlPlane.GetResourcePools", unused, pools)
+}
+
+func (s *ControlClient) GetHost(hostID string, host *host.Host) error {
+	return s.rpcClient.Call("ControlPlane.GetHost", hostID, host)
 }
 
 func (s *ControlClient) GetServiceEndpoints(serviceId string, response *map[string][]dao.ApplicationEndpoint) (err error) {
@@ -149,6 +158,10 @@ func (s *ControlClient) StartService(serviceId string, hostId *string) (err erro
 	return s.rpcClient.Call("ControlPlane.StartService", serviceId, hostId)
 }
 
+func (s *ControlClient) PauseService(serviceID string, unused *string) (err error) {
+	return s.rpcClient.Call("ControlPlane.PauseService", serviceID, unused)
+}
+
 func (s *ControlClient) RestartService(serviceId string, unused *int) (err error) {
 	return s.rpcClient.Call("ControlPlane.RestartService", serviceId, unused)
 }
@@ -193,8 +206,8 @@ func (s *ControlClient) RemoveServiceTemplate(serviceTemplateID string, unused *
 	return s.rpcClient.Call("ControlPlane.RemoveServiceTemplate", serviceTemplateID, unused)
 }
 
-func (s *ControlClient) GetVolume(serviceID string, volume *volume.Volume) error {
-	return s.rpcClient.Call("ControlPlane.GetVolume", serviceID, volume)
+func (s *ControlClient) GetServiceBindMounts(serviceID string, bindings *map[string]string) error {
+	return s.rpcClient.Call("ControlPlane.GetServiceBindMounts", serviceID, bindings)
 }
 
 func (s *ControlClient) DeleteSnapshot(snapshotId string, unused *int) error {

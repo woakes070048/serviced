@@ -16,6 +16,7 @@ package dfs
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,7 +25,6 @@ import (
 	"github.com/control-center/serviced/commons/docker"
 	"github.com/control-center/serviced/commons/layer"
 	"github.com/control-center/serviced/dao"
-	"github.com/control-center/serviced/datastore"
 	"github.com/control-center/serviced/domain/service"
 	"github.com/control-center/serviced/domain/servicedefinition"
 	"github.com/control-center/serviced/domain/servicetemplate"
@@ -107,8 +107,8 @@ func (dfs *DistributedFilesystem) Commit(dockerID string) (string, error) {
 }
 
 func (dfs *DistributedFilesystem) desynchronize(imageID commons.ImageID, commit time.Time) error {
-	svcs, err := dfs.facade.GetServices(datastore.Get(), dao.ServiceRequest{})
-	if err != nil {
+	var svcs []service.Service
+	if err := dfs.client.GetServices(dao.ServiceRequest{}, &svcs); err != nil {
 		glog.Errorf("Could not get all services", err)
 		return err
 	}
@@ -454,6 +454,110 @@ func loadImage(filename string, uuid string, tags []string) error {
 			glog.Errorf("Could not tag image %s as %s: %s", image.UUID, tag, err)
 			return err
 		}
+	}
+
+	return nil
+}
+
+// createVolumeDir() creates a directory on the running host using the user ids
+// found within the specified image. For example, it can create a directory owned
+// by the mysql user (as seen by the container) despite there being no mysql user
+// on the host system.
+// Assumes that the local docker image (imageSpec) exists and has been sync'd
+// with the registry.
+func createVolumeDir(hostPath, containerSpec, imageSpec, userSpec, permissionSpec string) error {
+	// FIXME: this relies on the underlying container to have /bin/sh that supports
+	// some advanced shell options. This should be rewriten so that serviced injects itself in the
+	// container and performs the operations using only go!
+	// the file globbing checks that /mnt/dfs is empty before the copy - should initially be empty
+	//    we don't want the copy to occur multiple times if restarting services.
+
+	var err error
+	var output []byte
+	command := [...]string{
+		"docker", "run",
+		"--rm",
+		"-v", hostPath + ":/mnt/dfs",
+		imageSpec,
+		"/bin/bash", "-c",
+		fmt.Sprintf(`
+			chown %s /mnt/dfs && \
+			chmod %s /mnt/dfs && \
+			shopt -s nullglob && \
+			shopt -s dotglob && \
+			files=(/mnt/dfs/*) && \
+			if [ ! -d "%s" ]; then
+				echo "ERROR: srcdir %s does not exist in container"
+				exit 2
+			elif [ ${#files[@]} -eq 0 ]; then
+				cp -rp %s/* /mnt/dfs/
+			fi
+			sleep 5s
+			`, userSpec, permissionSpec, containerSpec, containerSpec, containerSpec),
+	}
+
+	for i := 0; i < 1; i++ {
+		docker := exec.Command(command[0], command[1:]...)
+		output, err = docker.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+
+	glog.Errorf("could not create host volume: %+v, %s", command, string(output))
+	return err
+}
+
+func bindcopy(hostPath, containerPath, imageID, user, permission string) error {
+	const mount string = "/mnt/dfs"
+
+	var cd docker.ContainerDefinition
+	cd.Config = &dockerclient.Config{
+		Image:   imageID,
+		Volumes: map[string]struct{}{mount: struct{}{}},
+		Cmd: []string{"/bin/bash", "-c", fmt.Sprintf(`
+			chown %s /mnt/dfs && \
+			chmod %s /mnt/dfs && \
+			shopt -s nullglob && \
+			shopt -s dotglob && \
+			files=(/mnt/dfs/*) && \
+			if [ ! -d "%s" ]; then
+				echo "ERROR: srcdir %s does not exist in container"
+				exit 2
+			elif [ ${#files[@]} -eq 0 ]; then
+				cp -rp %s/* /mnt/dfs/
+			fi
+			sleep 5s
+		`, user, permission, containerPath, containerPath, containerPath)},
+	}
+	cd.HostConfig = dockerclient.HostConfig{
+		Binds: []string{fmt.Sprintf("%s:%s", hostPath, mount)},
+	}
+
+	ctr, err := docker.NewContainer(&cd, false, 30*time.Second, nil, nil)
+	if err != nil {
+		glog.Errorf("Could not create container (%s) for bind copy: %s", imageID, err)
+		return err
+	}
+
+	if err := ctr.Start(30 * time.Second); err != nil {
+		glog.Errorf("Could not start container %s (%s): %s", ctr.ID, imageID, err)
+		return err
+	}
+
+	xc, err := ctr.Wait(5 * time.Minute)
+
+	if err == docker.ErrRequestTimeout {
+		glog.Errorf("Container %s (%s) timed out: %s", ctr.ID, imageID, err)
+		return err
+	} else if err != nil {
+		glog.Errorf("Could not bind copy %s (%s): %s", ctr.ID, imageID, err)
+		return err
+	}
+
+	if xc != 0 {
+		glog.Warningf("Bind copy returned with exit code %d", xc)
 	}
 
 	return nil

@@ -19,8 +19,6 @@
 package node
 
 import (
-	"github.com/zenoss/glog"
-
 	"fmt"
 	"net"
 	"net/http"
@@ -295,62 +293,6 @@ func getInternalImageIDs(userSpec, imageSpec string) (uid, gid int, err error) {
 	userSpecCache.lookup[key] = uidgid{uid: uid, gid: gid}
 	time.Sleep(time.Second)
 	return
-}
-
-var createVolumeDirMutex sync.Mutex
-
-// createVolumeDir() creates a directory on the running host using the user ids
-// found within the specified image. For example, it can create a directory owned
-// by the mysql user (as seen by the container) despite there being no mysql user
-// on the host system.
-// Assumes that the local docker image (imageSpec) exists and has been sync'd
-// with the registry.
-func createVolumeDir(hostPath, containerSpec, imageSpec, userSpec, permissionSpec string) error {
-
-	createVolumeDirMutex.Lock()
-	defer createVolumeDirMutex.Unlock()
-
-	// FIXME: this relies on the underlying container to have /bin/sh that supports
-	// some advanced shell options. This should be rewriten so that serviced injects itself in the
-	// container and performs the operations using only go!
-	// the file globbing checks that /mnt/dfs is empty before the copy - should initially be empty
-	//    we don't want the copy to occur multiple times if restarting services.
-
-	var err error
-	var output []byte
-	command := [...]string{
-		"docker", "run",
-		"--rm",
-		"-v", hostPath + ":/mnt/dfs",
-		imageSpec,
-		"/bin/bash", "-c",
-		fmt.Sprintf(`
-chown %s /mnt/dfs && \
-chmod %s /mnt/dfs && \
-shopt -s nullglob && \
-shopt -s dotglob && \
-files=(/mnt/dfs/*) && \
-if [ ! -d "%s" ]; then
-	echo "ERROR: srcdir %s does not exist in container"
-	exit 2
-elif [ ${#files[@]} -eq 0 ]; then
-	cp -rp %s/* /mnt/dfs/
-fi
-sleep 5s
-`, userSpec, permissionSpec, containerSpec, containerSpec, containerSpec),
-	}
-
-	for i := 0; i < 1; i++ {
-		docker := exec.Command(command[0], command[1:]...)
-		output, err = docker.CombinedOutput()
-		if err == nil {
-			return nil
-		}
-		time.Sleep(time.Second)
-	}
-
-	glog.Errorf("could not create host volume: %+v, %s", command, string(output))
-	return err
 }
 
 // In the container

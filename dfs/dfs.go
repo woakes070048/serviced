@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/control-center/serviced/coordinator/client"
-	"github.com/control-center/serviced/facade"
+	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/zzk"
 	zkservice "github.com/control-center/serviced/zzk/service"
 	"github.com/zenoss/glog"
@@ -32,7 +32,7 @@ type DistributedFilesystem struct {
 	varpath    string
 	dockerHost string
 	dockerPort int
-	facade     *facade.Facade
+	client     dao.ControlPlane
 	timeout    time.Duration
 
 	// locking
@@ -43,7 +43,7 @@ type DistributedFilesystem struct {
 	logger *logger
 }
 
-func NewDistributedFilesystem(vfs, varpath, dockerRegistry string, facade *facade.Facade, timeout time.Duration) (*DistributedFilesystem, error) {
+func NewDistributedFilesystem(vfs, varpath, dockerRegistry string, client dao.ControlPlane, timeout time.Duration) (*DistributedFilesystem, error) {
 	host, port, err := parseRegistry(dockerRegistry)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func NewDistributedFilesystem(vfs, varpath, dockerRegistry string, facade *facad
 	}
 	lock := zkservice.ServiceLock(conn)
 
-	return &DistributedFilesystem{vfs: vfs, varpath: varpath, dockerHost: host, dockerPort: port, facade: facade, timeout: timeout, lock: lock}, nil
+	return &DistributedFilesystem{vfs: vfs, varpath: varpath, dockerHost: host, dockerPort: port, client: client, timeout: timeout, lock: lock}, nil
 }
 
 func (dfs *DistributedFilesystem) Lock() error {

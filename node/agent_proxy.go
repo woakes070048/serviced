@@ -68,14 +68,7 @@ func (a *HostAgent) GetServiceEndpoints(serviceId string, response *map[string][
 func (a *HostAgent) GetService(serviceID string, response *service.Service) (err error) {
 	*response = service.Service{}
 
-	controlClient, err := NewControlClient(a.master)
-	if err != nil {
-		glog.Errorf("Could not start ControlPlane client %v", err)
-		return nil
-	}
-	defer controlClient.Close()
-
-	err = controlClient.GetService(serviceID, response)
+	err = a.client.GetService(serviceID, response)
 	if response == nil {
 		*response = service.Service{}
 	}
@@ -85,13 +78,13 @@ func (a *HostAgent) GetService(serviceID string, response *service.Service) (err
 
 	getSvc := func(svcID string) (service.Service, error) {
 		svc := service.Service{}
-		err := controlClient.GetService(svcID, &svc)
+		err := a.client.GetService(svcID, &svc)
 		return svc, err
 	}
 
 	findChild := func(svcID, childName string) (service.Service, error) {
 		svc := service.Service{}
-		err := controlClient.FindChildService(dao.FindChildRequest{svcID, childName}, &svc)
+		err := a.client.FindChildService(dao.FindChildRequest{svcID, childName}, &svc)
 		return svc, err
 	}
 
@@ -101,14 +94,7 @@ func (a *HostAgent) GetService(serviceID string, response *service.Service) (err
 func (a *HostAgent) GetServiceInstance(req ServiceInstanceRequest, response *service.Service) (err error) {
 	*response = service.Service{}
 
-	controlClient, err := NewControlClient(a.master)
-	if err != nil {
-		glog.Errorf("Could not start ControlPlane client %v", err)
-		return nil
-	}
-	defer controlClient.Close()
-
-	err = controlClient.GetService(req.ServiceID, response)
+	err = a.client.GetService(req.ServiceID, response)
 	if response == nil {
 		*response = service.Service{}
 	}
@@ -118,13 +104,13 @@ func (a *HostAgent) GetServiceInstance(req ServiceInstanceRequest, response *ser
 
 	getSvc := func(svcID string) (service.Service, error) {
 		svc := service.Service{}
-		err := controlClient.GetService(svcID, &svc)
+		err := a.client.GetService(svcID, &svc)
 		return svc, err
 	}
 
 	findChild := func(svcID, childName string) (service.Service, error) {
 		svc := service.Service{}
-		err := controlClient.FindChildService(dao.FindChildRequest{svcID, childName}, &svc)
+		err := a.client.FindChildService(dao.FindChildRequest{svcID, childName}, &svc)
 		return svc, err
 	}
 
@@ -133,13 +119,7 @@ func (a *HostAgent) GetServiceInstance(req ServiceInstanceRequest, response *ser
 
 // Call the master's to retrieve its tenant id
 func (a *HostAgent) GetTenantId(serviceId string, tenantId *string) error {
-	client, err := NewControlClient(a.master)
-	if err != nil {
-		glog.Errorf("Could not start ControlPlane client %v", err)
-		return err
-	}
-	defer client.Close()
-	return client.GetTenantId(serviceId, tenantId)
+	return a.client.GetTenantId(serviceId, tenantId)
 }
 
 // GetProxySnapshotQuiece blocks until there is a snapshot request to the service
@@ -160,27 +140,20 @@ func (a *HostAgent) GetHealthCheck(req HealthCheckRequest, healthChecks *map[str
 	glog.V(4).Infof("ControlPlaneAgent.GetHealthCheck()")
 	*healthChecks = make(map[string]domain.HealthCheck, 0)
 
-	controlClient, err := NewControlClient(a.master)
-	if err != nil {
-		glog.Errorf("Could not start ControlPlane client %v", err)
-		return err
-	}
-	defer controlClient.Close()
-
 	var svc service.Service
-	err = controlClient.GetService(req.ServiceID, &svc)
+	err := a.client.GetService(req.ServiceID, &svc)
 	if err != nil {
 		return err
 	}
 	getSvc := func(svcID string) (service.Service, error) {
 		svc := service.Service{}
-		err := controlClient.GetService(svcID, &svc)
+		err := a.client.GetService(svcID, &svc)
 		return svc, err
 	}
 
 	findChild := func(svcID, childName string) (service.Service, error) {
 		svc := service.Service{}
-		err := controlClient.FindChildService(dao.FindChildRequest{svcID, childName}, &svc)
+		err := a.client.FindChildService(dao.FindChildRequest{svcID, childName}, &svc)
 		return svc, err
 	}
 	svc.EvaluateHealthCheckTemplate(getSvc, findChild, req.InstanceID)
@@ -192,13 +165,7 @@ func (a *HostAgent) GetHealthCheck(req HealthCheckRequest, healthChecks *map[str
 
 // LogHealthCheck proxies RegisterHealthCheck.
 func (a *HostAgent) LogHealthCheck(result domain.HealthCheckResult, unused *int) error {
-	controlClient, err := NewControlClient(a.master)
-	if err != nil {
-		glog.Errorf("Could not start ControlPlane client %v", err)
-		return err
-	}
-	defer controlClient.Close()
-	err = controlClient.LogHealthCheck(result, unused)
+	err := a.client.LogHealthCheck(result, unused)
 	return err
 }
 
@@ -298,33 +265,27 @@ func (a *HostAgent) GetZkInfo(_ string, zkInfo *ZkInfo) error {
 // GetServiceBindMounts returns the service bindmounts
 func (a *HostAgent) GetServiceBindMounts(serviceID string, bindmounts *map[string]string) error {
 	glog.V(4).Infof("ControlPlaneAgent.GetServiceBindMounts(serviceID:%s)", serviceID)
-	*bindmounts = make(map[string]string, 0)
+	a.dfs.Lock()
+	defer a.dfs.Unlock()
 
 	var tenantID string
 	if err := a.GetTenantId(serviceID, &tenantID); err != nil {
+		glog.Errorf("Could not look up tenant id for %s: %s", serviceID, err)
 		return err
 	}
 
-	var service service.Service
-	if err := a.GetService(serviceID, &service); err != nil {
+	var svc service.Service
+	if err := a.GetService(serviceID, &svc); err != nil {
+		glog.Errorf("Could not look up service %s: %s", serviceID, err)
 		return err
 	}
 
-	response := map[string]string{}
-	for _, volume := range service.Volumes {
-		if volume.Type != "" && volume.Type != "dfs" {
-			continue
-		}
-
-		resourcePath, err := a.setupVolume(tenantID, &service, volume)
-		if err != nil {
-			return err
-		}
-
-		glog.V(4).Infof("retrieved bindmount resourcePath:%s containerPath:%s", resourcePath, volume.ContainerPath)
-		response[resourcePath] = volume.ContainerPath
+	volume, err := a.dfs.GetVolume(tenantID)
+	if err != nil {
+		glog.Errorf("Could not acquire volume for service %s (%s) at %s: %s", svc.Name, svc.ID, tenantID, err)
+		return err
 	}
-	*bindmounts = response
 
-	return nil
+	*bindmounts, err = a.dfs.GetBindMounts(&svc, volume)
+	return err
 }

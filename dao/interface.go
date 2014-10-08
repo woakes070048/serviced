@@ -18,11 +18,12 @@ import (
 
 	"github.com/control-center/serviced/domain"
 	"github.com/control-center/serviced/domain/addressassignment"
+	"github.com/control-center/serviced/domain/host"
+	"github.com/control-center/serviced/domain/pool"
 	"github.com/control-center/serviced/domain/service"
 	"github.com/control-center/serviced/domain/servicestate"
 	"github.com/control-center/serviced/domain/servicetemplate"
 	"github.com/control-center/serviced/domain/user"
-	"github.com/control-center/serviced/volume"
 )
 
 // A generic ControlPlane error
@@ -70,6 +71,14 @@ type FindChildRequest struct {
 type ControlPlane interface {
 
 	//---------------------------------------------------------------------------
+
+	// Get all the resource pools
+	GetResourcePools(unused int, pools *[]pool.ResourcePool) error
+
+	// Get info about a host
+	GetHost(hostID string, host *host.Host) error
+
+	//---------------------------------------------------------------------------
 	// Service CRUD
 
 	//for a service, get it's tenant Id
@@ -113,6 +122,9 @@ type ControlPlane interface {
 
 	// Schedule the given service to start
 	StartService(serviceId string, unused *string) error
+
+	// Schedule the given service to pause
+	PauseService(serviceID string, unused *string) error
 
 	// Schedule the given service to restart
 	RestartService(serviceId string, unused *int) error
@@ -183,8 +195,8 @@ type ControlPlane interface {
 	// Return the number of layers in an image
 	ImageLayerCount(imageUUID string, layers *int) error
 
-	// Volume returns a service's volume
-	GetVolume(serviceID string, volume *volume.Volume) error
+	// GetServiceBindMounts returns the bind mounts for a service
+	GetServiceBindMounts(serviceID string, bindings *map[string]string) error
 
 	// Deletes a particular snapshot
 	DeleteSnapshot(snapshotID string, unused *int) error

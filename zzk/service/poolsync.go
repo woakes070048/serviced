@@ -23,7 +23,7 @@ import (
 // PoolSyncHandler is the handler for synchronizing ResourcePool data
 type PoolSyncHandler interface {
 	// GetResourcePools gets all resource pools
-	GetResourcePools() ([]*pool.ResourcePool, error)
+	GetResourcePools() ([]pool.ResourcePool, error)
 	// AddUpdateResourcePool adds or updates a resource pool
 	AddUpdateResourcePool(*pool.ResourcePool) error
 	// RemoveResourcePool deletes a resource pool
@@ -68,7 +68,7 @@ func (l *PoolSynchronizer) GetAll() ([]zzk.Node, error) {
 
 	nodes := make([]zzk.Node, len(pools))
 	for i, pool := range pools {
-		nodes[i] = &PoolNode{ResourcePool: pool}
+		nodes[i] = &PoolNode{ResourcePool: &pool}
 	}
 	return nodes, nil
 }

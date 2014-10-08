@@ -484,11 +484,20 @@ func (d *daemon) startAgent() error {
 			VirtualAddressSubnet: options.VirtualAddressSubnet,
 		}
 		// creates a zClient that is not pool based!
-		hostAgent, err := node.NewHostAgent(agentOptions)
+		masterClient, zkClient, err := node.Connect(agentOptions)
+		if err != nil {
+			glog.Fatalf("Could not connect: %s", err)
+		}
+
+		hostAgent, err := node.NewHostAgent(agentOptions, masterClient, zkClient)
+		if err != nil {
+			glog.Fatalf("Could not create host agent: %s", err)
+		}
 		d.hostAgent = hostAgent
 
 		d.waitGroup.Add(1)
 		go func() {
+			defer masterClient.Close()
 			hostAgent.Start(d.shutdown)
 			glog.Info("Host Agent has shutdown")
 			d.waitGroup.Done()

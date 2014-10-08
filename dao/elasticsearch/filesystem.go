@@ -17,7 +17,7 @@ import (
 	"fmt"
 
 	"github.com/control-center/serviced/datastore"
-	"github.com/control-center/serviced/volume"
+	"github.com/control-center/serviced/domain/service"
 
 	"github.com/control-center/serviced/zzk"
 	zkSnapshot "github.com/control-center/serviced/zzk/snapshot"
@@ -26,16 +26,29 @@ import (
 	"errors"
 )
 
-// GetVolume gets the volume of a service
-func (this *ControlPlaneDao) GetVolume(serviceID string, volume *volume.Volume) error {
+func (this *ControlPlaneDao) GetServiceBindMounts(serviceID string, bindings *map[string]string) error {
+	this.dfs.Lock()
+	defer this.dfs.Unlock()
+
 	var tenantID string
 	if err := this.GetTenantId(serviceID, &tenantID); err != nil {
 		glog.Errorf("Could not find tenant for service %s: %s", serviceID, err)
 		return err
 	}
 
-	var err error
-	volume, err = this.dfs.GetVolume(tenantID)
+	var svc service.Service
+	if err := this.GetService(serviceID, &svc); err != nil {
+		glog.Errorf("Could not look up service %s: %s", serviceID, err)
+		return err
+	}
+
+	volume, err := this.dfs.GetVolume(tenantID)
+	if err != nil {
+		glog.Errorf("Could not get volume for %s (%s) at %s: %s", svc.Name, svc.ID, tenantID, err)
+		return err
+	}
+
+	*bindings, err = this.dfs.GetBindMounts(&svc, volume)
 	return err
 }
 
