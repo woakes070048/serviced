@@ -7,13 +7,14 @@
     factory("$serviceHealth", ["$rootScope", "$q", "resourcesService", "$interval", "$translate",
     function($rootScope, $q, resourcesService, $interval, $translate){
 
-        var servicesService = resourcesService;
+        var servicesService = resourcesService,
+            statuses = {};
 
         var STATUS_STYLES = {
-            "bad": "glyphicon-exclamation-sign bad",
-            "good": "glyphicon-ok-sign good",
-            "unknown": "glyphicon-question-sign unknown",
-            "down": "glyphicon-minus-sign disabled"
+            "bad": "glyphicon glyphicon-exclamation bad",
+            "good": "glyphicon glyphicon-ok good",
+            "unknown": "glyphicon glyphicon-question unknown",
+            "down": "glyphicon glyphicon-minus disabled"
         };
 
         // simple array search util
@@ -46,251 +47,386 @@
                 services: servicesDeferred.promise,
                 health: healthCheckDeferred.promise
             }).then(function(results){
-                evaluateServiceStatus(results.services, results.health, appId);
+                var serviceHealthCheck, instanceHealthCheck,
+                    serviceStatus, instanceStatus, instanceUniqueId,
+                    statuses = {};
+
+                // iterate services healthchecks
+                for(var serviceId in results.services){
+                    serviceHealthCheck = results.health.Statuses[serviceId];
+                    serviceStatus = new Status(serviceId, results.services[serviceId].Name, results.services[serviceId].DesiredState);
+
+                    // if no healthcheck for this service, and this service 
+                    // wasn't called out specifically with appId, mark as down
+                    if(!serviceHealthCheck && serviceId !== appId){
+                        serviceStatus.statusRollup.incDown();
+                        serviceStatus.evaluateStatus();
+                   
+                    // fake "unknown" status for this service as it is
+                    // probably on its way up right no
+                    } else if(!serviceHealthCheck && appId === serviceId){
+                        // TODO - cleaner way to set this
+                        serviceStatus.statusRollup.incUnknown();
+                        serviceStatus.evaluateStatus();
+
+                    // otherwise, look for instances
+                    } else {
+
+                        // iterate instances healthchecks
+                        for(var instanceId in serviceHealthCheck){
+                            instanceHealthCheck = serviceHealthCheck[instanceId];
+                            instanceUniqueId = serviceId +"."+ instanceId;
+                            // evaluate the status of this instance
+                            instanceStatus = new Status(instanceUniqueId, results.services[serviceId].Name +" "+ instanceId, results.services[serviceId].DesiredState);
+                            instanceStatus.evaluateHealthChecks(instanceHealthCheck, results.health.Timestamp);
+                            
+                            // add this guy's statuses to hash map for easy lookup
+                            statuses[instanceUniqueId] = instanceStatus;
+                            // add this guy's status to his parent
+                            serviceStatus.children.push(instanceStatus);
+                        }
+                        
+                        // now that this services instances have been evaluated,
+                        // evaluate the status of this service
+                        serviceStatus.evaluateChildren();
+                    }
+
+                    statuses[serviceId] = serviceStatus;
+                }
+
+                updateHealthCheckUI(statuses);
+
             }).catch(function(err){
                 // something went awry
                 console.log("Promise err", err);
             });
         }
 
-        function evaluateServiceStatus(services, healthCheckData, appId) {
+        // used by Status to examine children and figure
+        // out what the parent's status is
+        function StatusRollup(){
+            this.good = 0;
+            this.bad = 0;
+            this.down = 0;
+            this.unknown = 0;
+            this.total = 0;
+        }
+        StatusRollup.prototype = {
+            constructor: StatusRollup,
 
-            var healths = healthCheckData.Statuses,
-                serverTimestamp = healthCheckData.Timestamp;
+            incGood: function(){
+                this.good++;
+                this.total++;
+            },
+            incBad: function(){
+                this.bad++;
+                this.total++;
+            },
+            incDown: function(){
+                this.down++;
+                this.total++;
+            },
+            incUnknown: function(){
+                this.unknown++;
+                this.total++;
+            },
 
-            var service, healthCheck, startTime,
-                healthChecksRollup,
-                tooltipDetails,
-                serviceStatus, healthCheckStatus, healthCheckStatusIcon;
+            // TODO - use assertion style ie: status.is.good() or status.any.good()
+            anyBad: function(){
+                return !!this.bad;
+            },
+            allBad: function(){
+                return this.total && this.bad === this.total;
+            },
+            anyGood: function(){
+                return !!this.good;
+            },
+            allGood: function(){
+                return this.total && this.good === this.total;
+            },
+            anyDown: function(){
+                return !!this.down;
+            },
+            allDown: function(){
+                return this.total && this.down === this.total;
+            },
+            anyUnknown: function(){
+                return !!this.unknown;
+            },
+            allUnknown: function(){
+                return this.total && this.unknown === this.total;
+            }
+        };
 
-            for (var ServiceId in services) {
+        function Status(id, name, desiredState){
+            this.id = id;
+            this.name = name;
+            this.desiredState = desiredState;
 
-                service = services[ServiceId];
-                healthCheck = healths[ServiceId];
+            this.statusRollup = new StatusRollup();
+            this.children = [];
 
-                if(!service){
-                    return;
-                }
+            // bad, good, unknown, down
+            // TODO - enum?
+            this.status = null;
+            this.description = null;
+        }
 
-                // all the healthcheck statuses for this service
-                // are rolled up into this to represent the health
-                // of the entire service
-                healthChecksRollup = {
-                    passing: false,
-                    failing: false,
-                    unknown: true,
-                    down: false
-                };
+        Status.prototype = {
+            constructor: Status,
 
-                tooltipDetails = [];
+            // distill this service's statusRollup into a single value
+            evaluateStatus: function(){
+                if(this.desiredState === 1){
+                    // if any failing, bad!
+                    if(this.statusRollup.anyBad()){
+                        this.status = "bad";
+                        this.description = $translate.instant("failing_health_checks");
 
-                // determine the status of each individual healthcheck
-                for (var name in healthCheck) {
-                    // get the time this service was started
-                    startTime = healthCheck[name].StartedAt;
+                    // if any down, oh no!
+                    } else if(this.statusRollup.anyDown()){
+                        this.status = "unknown";
+                        this.description = $translate.instant("container_unavailable");
 
-                    healthCheckStatus = determineHealthCheckStatus(healthCheck[name], serverTimestamp, startTime);
-
-                    switch(healthCheckStatus){
-                        case "passed":
-                            healthChecksRollup.passing = true;
-                            healthCheckStatusIcon = "good";
-                            break;
-                        case "failed":
-                            healthChecksRollup.failing = true;
-                            healthCheckStatusIcon = "bad";
-                            break;
-                        case "unknown":
-                            healthChecksRollup.unknown = true;
-                            healthCheckStatusIcon = "unknown";
-                            break;
-                        case "down":
-                            healthChecksRollup.down = true;
-                            healthCheckStatusIcon = "down";
-                            break;
-                        default:
-                            break;
+                    // if all are good, yay! good!
+                    } else if(this.statusRollup.allGood()){
+                        this.status = "good";
+                        this.description = $translate.instant("passing_health_checks");
+                    
+                    // huh. no idea what happened.
+                    } else {
+                        this.status = "unknown";
+                        this.description = "huh... what had happen?";
                     }
 
-                    // update tooltip details (per healthcheck)
-                    tooltipDetails.push({
-                        name: name,
-                        status: healthCheckStatusIcon
+                } else if(this.desiredState === 0){
+                    // if everyone is down, yay!
+                    if(this.statusRollup.allDown()){
+                        this.status = "down";
+                        this.description = $translate.instant("container_down");
+
+                    // stuff is down as expected
+                    } else {
+                        this.status = "unknown";
+                        this.description = $translate.instant("stopping_container");
+                    }
+                }
+            },
+
+            // roll up child status into this status
+            evaluateChildren: function(){
+
+                // TODO - handle no children
+
+                this.statusRollup = this.children.reduce(function(acc, childStatus){
+                    // TODO - don't directly access property
+                    acc[childStatus.status]++;
+                    acc.total++;
+
+                    return acc;
+                }.bind(this), new StatusRollup());
+
+                // TODO - pass description up through this stuff
+                this.evaluateStatus();
+            },
+
+            // set this status's statusRollup based on healthchecks
+            evaluateHealthChecks: function(healthChecks, timestamp){
+                var status;
+
+                this.statusRollup = new StatusRollup();
+
+                for(var healthCheck in healthChecks){
+                    status = evaluateHealthCheck(healthChecks[healthCheck], timestamp);
+
+                    // this is a healthcheck status object... kinda weird...
+                    this.children.push({
+                        name: healthCheck,
+                        status: status
                     });
+                    
+                    // add this guy's status to the total
+                    // TODO - use method, don't directly access property!
+                    this.statusRollup[status]++;
+                    this.statusRollup.total++;
                 }
 
-                serviceStatus = determineServiceStatus(service.DesiredState, healthChecksRollup);
+                this.evaluateStatus();
+            },
 
-                // TODO - only call this if statuses have changed since last tick
-                updateServiceStatus(service, serviceStatus.status, serviceStatus.description, tooltipDetails);
-            }
+        };
 
-            // if a specific appId was provided, its status may not
-            // yet be part of health checks, so give it unknown status
-            if(appId && !findInArray("ServiceID", healths, appId)){
-
-                // if this appId doesn't exist in the services list, then
-                // something must be pretty messed up
-                if(!services[appId]){
-                    throw new Error("Service with id", appId, "does not exist");
-                }
-
-                console.log("patching in unknown status for "+ appId);
-                
-                updateServiceStatus(services[appId], "unknown", $translate.instant("container_unavailable"));
-            }
-        }
-
-        // determines the overall health of the service by examining the status
-        // of all of its healthchecks as well as the desired state of the service
-        function determineServiceStatus(desiredState, healthChecksRollup){
-            var status,
-                description;
-
-            // the following conditions are relevant when the service
-            // *should* be started
-            if(desiredState === 1){
-
-                // service should be up, but is failing. bad!
-                if(healthChecksRollup.failing){
-                    status = "bad";
-                    description = $translate.instant("failing_health_checks");
-
-                // service should be up, but container has not
-                // yet loaded
-                } else if(healthChecksRollup.down){
-                    status = "unknown";
-                    description = $translate.instant("container_unavailable");
-
-                // service should be up, but seems unresponsive
-                // It could be just starting, or on its way down
-                } else if(!healthChecksRollup.passing && healthChecksRollup.unknown){
-                    status = "unknown";
-                    description = $translate.instant("missing_health_checks");
-
-                // service is up and healthy
-                } else if(healthChecksRollup.passing && !healthChecksRollup.unknown){
-                    status = "good";
-                    description = $translate.instant("passing_health_checks");
-
-                // TODO: This needs to be more representative of the health of a meta-service's children
-                } else {
-                    status = "good";
-                    description = $translate.instant("passing_health_checks");
-                }
-
-            // the following conditions are relevant when the service
-            // *should* be off
-            } else if(desiredState === 0){
-
-                // it should be off, but its still on... weird.
-                if(healthChecksRollup.passing){
-                    status = "unknown";
-                    description = $translate.instant("stopping_service");
-                    // TODO - enable stop control?
-
-                // service is off, as expected
-                } else {
-                    status = "down";
-                    description = $translate.instant("container_down");
-                }
-            }
-
-            return {
-                status: status,
-                description: description
-            };
-        }
-
-        // determines the status of an individual healthcheck
-        function determineHealthCheckStatus(healthCheck, serverTimestamp, startTime){
-            var status = healthCheck.Status;
+        // determine the health of a healthCheck based on start time, 
+        // up time and healthcheck
+        function evaluateHealthCheck(hc, timestamp){
+            var status = {};
 
             // calculates the number of missed healthchecks since last start time
-            var missedIntervals = (serverTimestamp - Math.max(healthCheck.Timestamp, startTime)) / healthCheck.Interval;
+            var missedIntervals = (timestamp - Math.max(hc.Timestamp, hc.StartedAt)) / hc.Interval;
 
             // if service hasn't started yet
-            if(startTime === undefined){
+            if(hc.StartedAt === undefined){
                 status = "down";
             
-            // if service has missed 2 updates, mark unknown
+            // if healthCheck has missed 2 updates, mark unknown
             } else if (missedIntervals > 2 && missedIntervals < 60) {
                 status = "unknown";
 
-            // if service has missed 60 updates, mark failed
+            // if healthCheck has missed 60 updates, mark failed
             } else if (missedIntervals > 60) {
-                status = "failed";
+                status = "bad";
+
+            // if Status is passed, then good!
+            } else if(hc.Status === "passed") {
+                status = "good";
+
+            // if Status is failed, then bad!
+            } else if(hc.Status === "failed") {
+                status = "bad";
+
+            // otherwise I have no idea
+            } else {
+                status = "unknown";
             }
 
             return status;
         }
 
-        function updateServiceStatus(service, status, description, tooltipDetails){
-            tooltipDetails = tooltipDetails || [];
+        var healthcheckTemplate = '<div class="healthIconBG"></div><i class="healthIcon glyphicon"></i><div class="healthIconBadge"></div>';
 
-            var $el = $("[data-id='"+ service.ID +"'] .healthIcon"),
-                tooltipsDetailsHTML;
+        function updateHealthCheckUI(statuses){
+            // select all healthchecks DOM elements and look
+            // up their respective class thing
+            $(".healthCheck").each(function(i, el){
+                var $el = $(el),
+                    id = el.dataset.id,
+                    lastStatus = el.dataset.lastStatus,
+                    $healthIcon, $badge,
+                    statusObj, popoverHTML;
 
-            // remove any existing popover if not currently visible            
-            if($el.popover && !$el.next('div.popover:visible').length){
-                $el.popover('destroy');
-            }
 
-            tooltipsDetailsHTML = tooltipDetails.reduce(function(acc, detail){
-                return acc += "<div class='healthTooltipDetailRow'>\
-                    <i class='healthIcon glyphicon "+ STATUS_STYLES[detail.status] +"'></i>\
-                    <div class='healthTooltipDetailName'>"+ detail.name +"</div>\
-                </div>";
-            }, "");
+                // if this is an unintialized healthcheck html element,
+                // put template stuff inside
+                if(!$el.children().length){
+                    $el.html(healthcheckTemplate);
+                }
 
-            // configure popover
-            // TODO - dont touch dom!
-            $el.popover({
-                trigger: "hover",
-                placement: "right",
-                delay: 0,
-                title: description,
-                html: true,
-                content: tooltipsDetailsHTML,
+                $healthIcon = $el.find(".healthIcon");
+                $badge = $el.find(".healthIconBadge");
 
-                // if DesiredState is 0 or there are no healthchecks, the
-                // popover should be only a title with no content
-                template: service.DesiredState === 0 || !tooltipsDetailsHTML ?
-                    '<div class="popover" role="tooltip"><div class="arrow"></div><h3 class="popover-title"></h3></div>' :
-                    undefined
-            });
-        
-            // update the main health icon
-            setStatus(service, status);
+                // for some reason this healthcheck has no id,
+                // so no icon for you!
+                if(!id){
+                    return;
+                }
 
-            // if the status has changed since last tick, or
-            // it was and is still unknown, notify user
-            if(service.healthStatus !== status || service.healthStatus === "unknown" && status === "unknown"){
-                bounceStatus(service);
-            }
-            // store the status for comparison later
-            service.healthStatus = status;
-        }
+                statusObj = statuses[id];
 
-        function setStatus(service, status){
-            service.healthIconClass = ["glyphicon", STATUS_STYLES[status]];
-        }
+                // TODO - this probably means the container is coming up,
+                // so handle this case
+                if(!statusObj){
+                    console.log("no statusObj for", id);
+                    return;
+                }
 
-        function bounceStatus(service){
-            service.healthIconClass.push("zoom");
+                // if there is more than one instance, and they are not
+                // all in a good state, show a status count
+                if(!statusObj.statusRollup.allGood() && !statusObj.statusRollup.allDown()){
+                    $el.addClass("wide");
+                    $badge.text(statusObj.statusRollup[statusObj.status] +"/"+ statusObj.statusRollup.total);
+                    $badge.show();
 
-            // TODO - dont touch dom!
-            var $el = $("[data-id='"+ service.ID +"'] .healthIcon");
-            if($el.length > 0){
-                $el.on("webkitAnimationEnd", function(){
-                    // if zoom is in the class list, remove it
-                    if(~service.healthIconClass.indexOf("zoom")){
-                        service.healthIconClass.splice(service.healthIconClass.indexOf("zoom"), 1);
+                // else, hide the badge
+                } else {
+                    $el.removeClass("wide");
+                    $badge.hide();
+                }
+               
+                // setup popover
+                // remove any existing popover if not currently visible
+                if($el.popover && !$el.next('div.popover:visible').length){
+                    $el.popover('destroy');
+                }
+
+                // if this statusObj has children, we wanna show
+                // them in the healtcheck tooltip, so generate
+                // some yummy html
+                if(statusObj.children.length){
+                    popoverHTML = [];
+
+                    // TODO - MOVE THIS FUNCTION! GAH!
+                    var hcRowTemplate = function(hc){
+                        return "<div class='healthTooltipDetailRow "+ hc.status +"'>\
+                                <i class='healthIcon glyphicon'></i>\
+                            <div class='healthTooltipDetailName'>"+ hc.name +"</div>\
+                        </div>";
+                    };
+
+                    var isHealthCheckStatus = function(status){
+                       return !status.id;
+                    };
+
+                    // if this status's children are healthchecks,
+                    // no need for instance rows, go straight to healthcheck rows
+                    if(statusObj.children.length && isHealthCheckStatus(statusObj.children[0])){
+                        statusObj.children.forEach(function(hc){
+                            popoverHTML.push(hcRowTemplate(hc));
+                        });
+                         
+                    // else these are instances, so create instance rows
+                    // AND healthcheck rows
+                    } else {
+                        statusObj.children.forEach(function(instanceStatus){
+                            popoverHTML.push("<div class='healthTooltipDetailRow'>");
+                            popoverHTML.push("<div style='font-weight: bold; font-size: .9em; padding: 5px 0 3px 0;'>"+ instanceStatus.name +"</div>");
+                            instanceStatus.children.forEach(function(hc){
+                                popoverHTML.push(hcRowTemplate(hc));
+                            });
+                            popoverHTML.push("</div>");
+                        });
                     }
-                    // clean up animation end listener
-                    $el.off("webkitAnimationEnd");
+
+                    popoverHTML = popoverHTML.join("");
+                }
+
+                // configure popover
+                // TODO - dont touch dom!
+                $el.popover({
+                    trigger: "hover",
+                    placement: "right",
+                    delay: 0,
+                    title: statusObj.description,
+                    html: true,
+                    content: popoverHTML,
+
+                    // if DesiredState is 0 or there are no healthchecks, the
+                    // popover should be only a title with no content
+                    template: statusObj.desiredState === 0 || !popoverHTML ?
+                        '<div class="popover" role="tooltip"><div class="arrow"></div><h3 class="popover-title"></h3></div>' :
+                        undefined
                 });
-            }
+
+                $el.removeClass(Object.keys(STATUS_STYLES).join(" "))
+                    .addClass(statusObj.status);
+
+                // if the status has changed since last tick, or
+                // it was and is still unknown, notify user
+                if(lastStatus !== statusObj.status || lastStatus === "unknown" && statusObj.status === "unknown"){
+                    bounceStatus($el);
+                }
+                // store the status for comparison later
+                el.dataset.lastStatus = statusObj.status;
+            });
+        }
+
+       function bounceStatus($el){
+            $el.addClass("zoom");
+
+            $el.on("webkitAnimationEnd mozAnimationEnd", function(){
+                $el.removeClass("zoom");
+                // clean up animation end listener
+                $el.off("webkitAnimationEnd mozAnimationEnd");
+            });
         }
 
         return {

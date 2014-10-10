@@ -636,11 +636,45 @@ function refreshRunningForHost($scope, resourcesService, hostId) {
 
 function refreshRunningForService($scope, resourcesService, serviceId, extracallback) {
     if ($scope.running === undefined) {
-        $scope.running = {};
+        $scope.running = {data:[]};
     }
 
     resourcesService.get_running_services_for_service(serviceId, function(runningServices) {
-        $scope.running.data = runningServices;
+        // merge running.data with runningServices
+        // create a list of current running.data ids to check for removeals
+        var oldIds = $scope.running.data.map(function(el){return el.ID;}),
+            running = $scope.running.data;
+
+        runningServices.forEach(function(runningService){
+            var oldServiceIndex = oldIds.indexOf(runningService.ID),
+                oldService;
+
+            // if this guy is already in the running list
+            if(oldServiceIndex !== -1){
+                oldService = running[oldServiceIndex];
+                
+                // merge changes in
+                for(var i in runningService){
+                    oldService[i] = runningService[i];
+                }
+
+                // remove this id from the oldIds list
+                oldIds[oldServiceIndex] = null;
+                
+            // else this is a new running service, so add it
+            } else {
+                running.push(runningService);
+            }
+        });
+
+        // any ids left in oldIds should be removed from running
+        running.forEach(function(runningService){
+            if(~oldIds.indexOf(runningService.ID)){
+                // TODO - remove from running!
+                console.log(runningService.ID, "should be removed");
+            }
+        });
+
         $scope.running.sort = 'InstanceID';
         for (var i=0; i < runningServices.length; i++) {
             runningServices[i].DesiredState = 1; // All should be running

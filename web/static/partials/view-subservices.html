@@ -1,7 +1,7 @@
     <div ng-show="loggedIn" ng-include="'/static/partials/top-nav.html'"></div>
 
-    <h3>
-        <div class="healthIconScaler"><i class="healthIcon" ng-class="services.current.healthIconClass"></i></div>
+    <h3 style="position: relative;">
+        <div class="healthCheck" data-id="{{services.current.ID}}" style="display: inline-block; font-size: .6em;"></div>
         {{services.current.Name}}
         <span class="version" ng-show="services.current.Version"> (v{{services.current.Version}})</span>
     </h3>
@@ -154,9 +154,9 @@
         <tr>
           <!-- <th ng-repeat="header in services.headers">{{header.name|translate}}</th> -->
           <th style="white-space: nowrap; width:200px;">{{'label_application'|translate}}</th>
-          <th style="width: 40px;">{{'label_service_status'|translate}}</th>
+          <th style="width: 70px;">{{'label_service_status'|translate}}</th>
           <th style="width: 200px;" ng-if="!services.current.isvc">{{'host'|translate}}</th>
-          <th style="width: 500px;">{{'deployed_tbl_description'|translate}}</th>
+          <th style="width: 465px;">{{'deployed_tbl_description'|translate}}</th>
           <th ng-if="!services.current.isvc">{{'running_tbl_actions'|translate}}</th>
         </tr>
       </thead>
@@ -173,9 +173,9 @@
                 {{app.Name}}<span class="version" ng-show="app.Version"> (v{{app.Version}})</span>
             </span>
           </td>
-          <td style="text-align:center;">
+          <td style="text-align: center;">
             <div ng-if="app.children === undefined">
-              <i class="healthIcon" ng-class="app.healthIconClass"></i>
+              <div class="healthCheck" data-id="{{app.ID}}"></div>
             </div>
           </td>
           <td ng-if="!services.current.isvc">
@@ -201,7 +201,7 @@
     </table>
 
   <!-- This table has running instances -->
-    <h3 ng-show="running.data.length > 0">{{'running_tbl_instances'|translate}}</h3>
+  <h3 ng-show="running.data.length > 0">{{'running_tbl_instances'|translate}}</h3>
   <table class="table table-striped" ng-show="running.data.length > 0">
     <thead>
       <tr>
@@ -217,11 +217,11 @@
       <tr ng-hide="running.data !== undefined">
         <td colspan="100%" align="center"><img src="/static/img/loading.gif"></td>
       </tr>
-      <tr ng-repeat="app in running.data | orderBy:running.sort">
+      <tr ng-repeat="app in running.data | orderBy:running.sort" data-id="{{app.ID}}.{{app.InstanceID}}">
         <td>{{app.InstanceID}}</td>
         <td>{{app.Name}}</td>
         <td style="text-align:center;">
-          <i class="healthIcon" ng-class="services.current.healthIconClass"></i>
+          <div class="healthCheck" data-id="{{app.ServiceID}}.{{app.InstanceID}}"></div>
         </td>
         <td ng-click="click_host(app.HostID)" class="link">{{app.hostName}}</td>
         <td>{{app.DockerID}}</td>
