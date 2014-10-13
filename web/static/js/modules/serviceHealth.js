@@ -27,8 +27,7 @@
         }
 
         // updates health check data for all services
-        // `appId` is the id of the specific service being clicked
-        function update(appId) {
+        function update() {
 
             // TODO - these methods should return promises, but they
             // don't so use our own promises
@@ -56,17 +55,10 @@
                     serviceHealthCheck = results.health.Statuses[serviceId];
                     serviceStatus = new Status(serviceId, results.services[serviceId].Name, results.services[serviceId].DesiredState);
 
-                    // if no healthcheck for this service, and this service 
-                    // wasn't called out specifically with appId, mark as down
-                    if(!serviceHealthCheck && serviceId !== appId){
+                    // if no healthcheck for this service mark as down
+                    if(!serviceHealthCheck){
                         serviceStatus.statusRollup.incDown();
                         serviceStatus.evaluateStatus();
-                   
-                    // fake "unknown" status for this service as it is
-                    // probably on its way up right now
-                    } else if(!serviceHealthCheck && appId === serviceId){
-                        //serviceStatus.statusRollup.incUnknown();
-                        //serviceStatus.evaluateStatus();
 
                     // otherwise, look for instances
                     } else {
@@ -114,20 +106,22 @@
             constructor: StatusRollup,
 
             incGood: function(){
-                this.good++;
-                this.total++;
+                this.incStatus("good");
             },
             incBad: function(){
-                this.bad++;
-                this.total++;
+                this.incStatus("bad");
             },
             incDown: function(){
-                this.down++;
-                this.total++;
+                this.incStatus("down");
             },
             incUnknown: function(){
-                this.unknown++;
-                this.total++;
+                this.incStatus("unknown");
+            },
+            incStatus: function(status){
+                if(this[status] !== undefined){
+                    this[status]++;
+                    this.total++;
+                }
             },
 
             // TODO - use assertion style ie: status.is.good() or status.any.good()
@@ -166,7 +160,7 @@
             this.children = [];
 
             // bad, good, unknown, down
-            // TODO - enum?
+            // TODO - use enum or constants for statuses
             this.status = null;
             this.description = null;
         }
@@ -185,7 +179,7 @@
                     // if any down, oh no!
                     } else if(this.statusRollup.anyDown()){
                         this.status = "unknown";
-                        this.description = $translate.instant("container_unavailable");
+                        this.description = $translate.instant("starting_service");
 
                     // if all are good, yay! good!
                     } else if(this.statusRollup.allGood()){
@@ -215,17 +209,11 @@
             // roll up child status into this status
             evaluateChildren: function(){
 
-                // TODO - handle no children
-
                 this.statusRollup = this.children.reduce(function(acc, childStatus){
-                    // TODO - don't directly access property
-                    acc[childStatus.status]++;
-                    acc.total++;
-
+                    acc.incStatus(childStatus.status);
                     return acc;
                 }.bind(this), new StatusRollup());
 
-                // TODO - pass description up through this stuff
                 this.evaluateStatus();
             },
 
@@ -245,9 +233,7 @@
                     });
                     
                     // add this guy's status to the total
-                    // TODO - use method, don't directly access property!
-                    this.statusRollup[status]++;
-                    this.statusRollup.total++;
+                    this.statusRollup.incStatus(status);
                 }
 
                 this.evaluateStatus();
@@ -335,13 +321,12 @@
                     statusObj.statusRollup.allDown() ||
                     statusObj.desiredState === 0;
 
-                //// if there is more than one instance, and they are not
-                //// all in a good state, show a status count
-                if(!statusObj.statusRollup.allDown()){
+                // if service should be up, show number of instances
+                if(statusObj.desiredState === 1){
                     $el.addClass("wide");
                     $badge.text(statusObj.statusRollup.good +"/"+ statusObj.statusRollup.total).show();
 
-                //// else, hide the badge
+                // else, hide the badge
                 } else {
                     $el.removeClass("wide");
                     $badge.hide();
@@ -364,14 +349,6 @@
                 if(statusObj.children.length){
                     popoverHTML = [];
 
-                    // TODO - MOVE THIS FUNCTION! GAH!
-                    var hcRowTemplate = function(hc){
-                        return "<div class='healthTooltipDetailRow "+ hc.status +"'>\
-                                <i class='healthIcon glyphicon'></i>\
-                            <div class='healthTooltipDetailName'>"+ hc.name +"</div>\
-                        </div>";
-                    };
-
                     var isHealthCheckStatus = function(status){
                        return !status.id;
                     };
@@ -388,7 +365,7 @@
                         $el.removeClass("wide");
 
                         statusObj.children.forEach(function(hc){
-                            popoverHTML.push(hcRowTemplate(hc));
+                            popoverHTML.push(bindHealthCheckRowTemplate(hc));
                         });
                          
                     // else these are instances, so create instance rows
@@ -401,7 +378,7 @@
                                 popoverHTML.push("<div class='healthTooltipDetailRow'>");
                                 popoverHTML.push("<div style='font-weight: bold; font-size: .9em; padding: 5px 0 3px 0;'>"+ instanceStatus.name +"</div>");
                                 instanceStatus.children.forEach(function(hc){
-                                    popoverHTML.push(hcRowTemplate(hc));
+                                    popoverHTML.push(bindHealthCheckRowTemplate(hc));
                                 });
                                 popoverHTML.push("</div>");
                             }
@@ -439,8 +416,14 @@
                 el.dataset.lastStatus = statusObj.status;
             });
         }
+        function bindHealthCheckRowTemplate(hc){
+            return "<div class='healthTooltipDetailRow "+ hc.status +"'>\
+                    <i class='healthIcon glyphicon'></i>\
+                <div class='healthTooltipDetailName'>"+ hc.name +"</div>\
+            </div>";
+        }
 
-       function bounceStatus($el){
+        function bounceStatus($el){
             $el.addClass("zoom");
 
             $el.on("webkitAnimationEnd mozAnimationEnd", function(){
