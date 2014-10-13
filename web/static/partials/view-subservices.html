@@ -1,7 +1,7 @@
     <div ng-show="loggedIn" ng-include="'/static/partials/top-nav.html'"></div>
 
     <h3 style="position: relative;">
-        <div class="healthCheck" data-id="{{services.current.ID}}" style="display: inline-block; font-size: .6em;"></div>
+        <div ng-if="services.current.children === undefined" class="healthCheck" data-id="{{services.current.ID}}" style="display: inline-block; font-size: .6em;"></div>
         {{services.current.Name}}
         <span class="version" ng-show="services.current.Version"> (v{{services.current.Version}})</span>
     </h3>
@@ -154,9 +154,8 @@
         <tr>
           <!-- <th ng-repeat="header in services.headers">{{header.name|translate}}</th> -->
           <th style="white-space: nowrap; width:200px;">{{'label_application'|translate}}</th>
-          <th style="width: 70px;">{{'label_service_status'|translate}}</th>
-          <th style="width: 200px;" ng-if="!services.current.isvc">{{'host'|translate}}</th>
-          <th style="width: 465px;">{{'deployed_tbl_description'|translate}}</th>
+          <th style="width: 75px; line-height: 11px;">Instances <span style="font-size: .75em;">healthy/total</span></th>
+          <th style="width: 600px;">{{'deployed_tbl_description'|translate}}</th>
           <th ng-if="!services.current.isvc">{{'running_tbl_actions'|translate}}</th>
         </tr>
       </thead>
@@ -173,14 +172,10 @@
                 {{app.Name}}<span class="version" ng-show="app.Version"> (v{{app.Version}})</span>
             </span>
           </td>
-          <td style="text-align: center;">
+          <td style="text-align:center;">
             <div ng-if="app.children === undefined">
               <div class="healthCheck" data-id="{{app.ID}}"></div>
             </div>
-          </td>
-          <td ng-if="!services.current.isvc">
-            <a ng-click="click_host(app.runningHosts[0].ID)" class="link">{{app.runningHosts[0].HostName}}</a>
-            <span class="note" ng-show="app.runningHosts.length > 1">&nbsp;(+{{app.runningHosts.length -1}} {{'more' | translate}})</span>
           </td>
           <td>
             <input style="border:none; background:rgba(0,0,0,0); width:100%; outline: none;" readonly type="text" value="{{app.Description}}">
@@ -238,7 +233,7 @@
       <table class="table table-striped">
           <thead>
               <tr>
-                  <th>{{'task_schedule'|translate}}</th>
+                <th>{{'task_schedule'|translate}}</th>
                 <th>{{'task_command' |translate}}</th>
                 <th>{{'task_last_run'|translate}}</th>
                 <th>{{'task_run_count'|translate}}</th>

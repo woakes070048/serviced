@@ -63,11 +63,10 @@
                         serviceStatus.evaluateStatus();
                    
                     // fake "unknown" status for this service as it is
-                    // probably on its way up right no
+                    // probably on its way up right now
                     } else if(!serviceHealthCheck && appId === serviceId){
-                        // TODO - cleaner way to set this
-                        serviceStatus.statusRollup.incUnknown();
-                        serviceStatus.evaluateStatus();
+                        //serviceStatus.statusRollup.incUnknown();
+                        //serviceStatus.evaluateStatus();
 
                     // otherwise, look for instances
                     } else {
@@ -94,7 +93,7 @@
                     statuses[serviceId] = serviceStatus;
                 }
 
-                updateHealthCheckUI(statuses);
+                updateHealthCheckUI(statuses, results.services);
 
             }).catch(function(err){
                 // something went awry
@@ -193,10 +192,10 @@
                         this.status = "good";
                         this.description = $translate.instant("passing_health_checks");
                     
-                    // huh. no idea what happened.
+                    // some health checks are late
                     } else {
                         this.status = "unknown";
-                        this.description = "huh... what had happen?";
+                        this.description = $translate.instant("missing_health_checks");
                     }
 
                 } else if(this.desiredState === 0){
@@ -208,7 +207,7 @@
                     // stuff is down as expected
                     } else {
                         this.status = "unknown";
-                        this.description = $translate.instant("stopping_container");
+                        this.description = $translate.instant("stopping_service");
                     }
                 }
             },
@@ -292,9 +291,9 @@
             return status;
         }
 
-        var healthcheckTemplate = '<div class="healthIconBG"></div><i class="healthIcon glyphicon"></i><div class="healthIconBadge"></div>';
+        var healthcheckTemplate = '<i class="healthIcon glyphicon"></i><div class="healthIconBadge"></div>';
 
-        function updateHealthCheckUI(statuses){
+        function updateHealthCheckUI(statuses, services){
             // select all healthchecks DOM elements and look
             // up their respective class thing
             $(".healthCheck").each(function(i, el){
@@ -302,8 +301,9 @@
                     id = el.dataset.id,
                     lastStatus = el.dataset.lastStatus,
                     $healthIcon, $badge,
-                    statusObj, popoverHTML;
-
+                    statusObj, popoverHTML,
+                    hideHealthChecks,
+                    placement = "right";
 
                 // if this is an unintialized healthcheck html element,
                 // put template stuff inside
@@ -322,21 +322,26 @@
 
                 statusObj = statuses[id];
 
-                // TODO - this probably means the container is coming up,
-                // so handle this case
+                // this instance is on its way up, so create an "unknown" status for it
                 if(!statusObj){
-                    console.log("no statusObj for", id);
-                    return;
+                    console.log("Creating unknown statusObj for", id);
+                    statusObj = new Status(id, "", 1);
+                    statusObj.statusRollup.incDown();
+                    statusObj.evaluateStatus();
                 }
 
-                // if there is more than one instance, and they are not
-                // all in a good state, show a status count
-                if(!statusObj.statusRollup.allGood() && !statusObj.statusRollup.allDown()){
-                    $el.addClass("wide");
-                    $badge.text(statusObj.statusRollup[statusObj.status] +"/"+ statusObj.statusRollup.total);
-                    $badge.show();
+                // determine if we should hide healthchecks
+                hideHealthChecks = statusObj.statusRollup.allGood() ||
+                    statusObj.statusRollup.allDown() ||
+                    statusObj.desiredState === 0;
 
-                // else, hide the badge
+                //// if there is more than one instance, and they are not
+                //// all in a good state, show a status count
+                if(!statusObj.statusRollup.allDown()){
+                    $el.addClass("wide");
+                    $badge.text(statusObj.statusRollup.good +"/"+ statusObj.statusRollup.total).show();
+
+                //// else, hide the badge
                 } else {
                     $el.removeClass("wide");
                     $badge.hide();
@@ -346,6 +351,11 @@
                 // remove any existing popover if not currently visible
                 if($el.popover && !$el.next('div.popover:visible').length){
                     $el.popover('destroy');
+                }
+
+                // if this $el is inside an h3, make the popover point down
+                if($el.parent().prop("tagName").toLowerCase() === "h3"){
+                    placement = "bottom";
                 }
 
                 // if this statusObj has children, we wanna show
@@ -369,6 +379,14 @@
                     // if this status's children are healthchecks,
                     // no need for instance rows, go straight to healthcheck rows
                     if(statusObj.children.length && isHealthCheckStatus(statusObj.children[0])){
+                        // if these are JUST healthchecks, then don't allow them
+                        // to be hidden. this ensures that healthchecks show up for
+                        // running instances.
+                        hideHealthChecks = false;
+                        // don't show count badge for healthchecks either
+                        $badge.hide();
+                        $el.removeClass("wide");
+
                         statusObj.children.forEach(function(hc){
                             popoverHTML.push(hcRowTemplate(hc));
                         });
@@ -377,12 +395,16 @@
                     // AND healthcheck rows
                     } else {
                         statusObj.children.forEach(function(instanceStatus){
-                            popoverHTML.push("<div class='healthTooltipDetailRow'>");
-                            popoverHTML.push("<div style='font-weight: bold; font-size: .9em; padding: 5px 0 3px 0;'>"+ instanceStatus.name +"</div>");
-                            instanceStatus.children.forEach(function(hc){
-                                popoverHTML.push(hcRowTemplate(hc));
-                            });
-                            popoverHTML.push("</div>");
+                            // only create an instance row for this instance if
+                            // it's in a bad or unknown state
+                            if(instanceStatus.status === "bad" || instanceStatus.status === "unknown"){
+                                popoverHTML.push("<div class='healthTooltipDetailRow'>");
+                                popoverHTML.push("<div style='font-weight: bold; font-size: .9em; padding: 5px 0 3px 0;'>"+ instanceStatus.name +"</div>");
+                                instanceStatus.children.forEach(function(hc){
+                                    popoverHTML.push(hcRowTemplate(hc));
+                                });
+                                popoverHTML.push("</div>");
+                            }
                         });
                     }
 
@@ -393,15 +415,14 @@
                 // TODO - dont touch dom!
                 $el.popover({
                     trigger: "hover",
-                    placement: "right",
+                    placement: placement,
                     delay: 0,
                     title: statusObj.description,
                     html: true,
                     content: popoverHTML,
 
-                    // if DesiredState is 0 or there are no healthchecks, the
-                    // popover should be only a title with no content
-                    template: statusObj.desiredState === 0 || !popoverHTML ?
+                    // if hideHealthChecks or no popoverHTML, make the popover just a title
+                    template: hideHealthChecks || !popoverHTML ?
                         '<div class="popover" role="tooltip"><div class="arrow"></div><h3 class="popover-title"></h3></div>' :
                         undefined
                 });

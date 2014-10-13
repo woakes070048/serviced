@@ -640,8 +640,9 @@ function refreshRunningForService($scope, resourcesService, serviceId, extracall
     }
 
     resourcesService.get_running_services_for_service(serviceId, function(runningServices) {
-        // merge running.data with runningServices
-        // create a list of current running.data ids to check for removeals
+        // merge running.data with runningServices without creating a new object
+
+        // create a list of current running.data ids to check for removals
         var oldIds = $scope.running.data.map(function(el){return el.ID;}),
             running = $scope.running.data;
 
@@ -668,12 +669,12 @@ function refreshRunningForService($scope, resourcesService, serviceId, extracall
         });
 
         // any ids left in oldIds should be removed from running
-        running.forEach(function(runningService){
-            if(~oldIds.indexOf(runningService.ID)){
-                // TODO - remove from running!
-                console.log(runningService.ID, "should be removed");
+        for(var i = running.length - 1; i >= 0; i--){
+            if(~oldIds.indexOf(running[i].ID)){
+                console.log("removing old id", running[i].ID, "at index", i);
+                running.splice(i, 1);
             }
-        });
+        }
 
         $scope.running.sort = 'InstanceID';
         for (var i=0; i < runningServices.length; i++) {

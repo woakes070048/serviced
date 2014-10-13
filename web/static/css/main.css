@@ -1170,28 +1170,14 @@ rect {
 
 
 .healthCheck {
-    border-radius: 50px;
-    background-color: #AAA;
     position: relative;
+    margin-left: 4px;
+    width: 24px;
     height: 22px;
-    width: 22px;
     overflow: hidden;
 }
 .healthCheck.wide {
-    width: 41px;
-}
-.healthCheck.good {
-    background-color: #0084DB;
-}
-.healthCheck.unknown{
-    background-color: #94C0DB;
-}
-.healthCheck.disabled {
-    background-color: #AAA;
-    cursor: auto;
-}
-.healthCheck.bad {
-    background-color: #9C1200;
+    width: 46px;
 }
 .healthCheck.zoom {
     animation: zoom .3s;
@@ -1216,35 +1202,23 @@ rect {
 }
 
 .healthCheck {
-    transition: width .5s;
+    transition: width .35s;
 }
-
 
 .healthIcon {
     font-size: 22px;
     position: absolute;
     top: -2px;
-    left: 0px;
-}
-.healthIconBG {
-    width: 14px;
-    height: 14px;
-    position: absolute;
-    background-color: white;
-    top: 4px;
-    left: 4px;
-    border-radius: 50%;
+    left: 1px;
 }
 .healthIconBadge {
-    color: white;
-    font-size: .7em;
+    font-size: .9em;
     font-weight: bold;
     display: inline-block;
     vertical-align: top;
     position: absolute;
-    top: 4px;
-    left: 20px;
-    cursor: default;
+    top: 3px;
+    left: 26px;
 }
 
 /* NOTE: hardcoding glyphicon glyphs here to make CSS simpler.
@@ -1282,13 +1256,17 @@ rect {
 }
 
 h3 .healthCheck {
-    top: 4px;
+    top: 2px;
+    width: 24px !important;
 }
 h3 .healthIconBadge {
-    top: 6px;
+    display: none !important;
 }
 h3 .healthTooltipDetailRow {
-    padding-bottom: 2px;
+    padding-bottom: 4px;
+}
+h3 .healthTooltipDetailRow .healthIcon {
+    top: -1px;
 }
 
 /* chart styles */
