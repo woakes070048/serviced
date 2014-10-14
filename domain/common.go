@@ -94,11 +94,10 @@ func (hc *HealthCheck) UnmarshalJSON(data []byte) error {
 }
 
 type HealthCheckResult struct {
-	ServiceID  string
-	InstanceID string
-	Name       string
-	Timestamp  string
-	Passed     string
+	ServiceID string
+	Name      string
+	Timestamp string
+	Passed    string
 }
 
 type Prereq struct {
