@@ -14,6 +14,7 @@
 package service
 
 import (
+	"fmt"
 	"path"
 	"sort"
 	"sync"
@@ -355,6 +356,16 @@ func RemoveService(cancel <-chan interface{}, conn client.Connection, serviceID 
 		return err
 	} else if !exists {
 		return nil
+	}
+
+	// Verify there are no other shells available
+	if shells, err := FindShells(conn, serviceID); err != nil {
+		return err
+	} else if count := len(shells); count > 0 {
+		for _, s := range shells {
+			glog.Warningf("Found container %s on %s running %s", s.ContainerID, s.HostIP, s.ServiceID)
+		}
+		return fmt.Errorf("found %s shell instances of %s", count, serviceID)
 	}
 
 	// If it exists, stop the service

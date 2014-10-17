@@ -39,6 +39,11 @@ func (this *ControlPlaneDao) UpdateService(svc service.Service, unused *int) err
 
 //
 func (this *ControlPlaneDao) RemoveService(id string, unused *int) error {
+	// You have to lock the DFS to prevent users from shelling into the
+	// service and starting new instances
+	this.dfs.Lock()
+	defer this.dfs.Unlock()
+
 	if err := this.facade.RemoveService(datastore.Get(), id); err != nil {
 		return err
 	}
