@@ -1,6 +1,8 @@
-function DeployedAppsControl($scope, $routeParams, $location, $notification, resourcesService, $serviceHealth, authService, $modalService, $translate, $timeout, $cookies) {
+function DeployedAppsControl($scope, $routeParams, $location, $notification, resourcesService, $serviceHealth, authService, $modalService, $translate, $timeout, $cookies, servicesService) {
     // Ensure logged in
     authService.checkLogin($scope);
+
+    window.a = servicesService;
 
     //constantly poll for apps that are in the process of being deployed so we can alert the user
     $scope.deployingServices = [];
@@ -275,18 +277,25 @@ function DeployedAppsControl($scope, $routeParams, $location, $notification, res
     // Get a list of templates
     refreshTemplates();
 
-    // Get a list of deployed apps
-    refreshServices($scope, resourcesService, false, function(){
-        $serviceHealth.update();
 
-        // if only isvcs are deployed, and this is the first time
-        // running deploy wizard, show the deploy apps modal
-        if(!$cookies.autoRunWizardHasRun && $scope.services.data.length === 1){
-            $scope.modalAddApp();
-        }
+    servicesService.update().then(function(servicesMap){
+        $scope.services = $scope.services || {};
+        $scope.services.data = servicesService.getTree();
+        $scope.services.mapped = servicesService.getMap();
     });
+
+    // Get a list of deployed apps
+    //refreshServices($scope, resourcesService, false, function(){
+        //$serviceHealth.update();
+
+        //// if only isvcs are deployed, and this is the first time
+        //// running deploy wizard, show the deploy apps modal
+        //if(!$cookies.autoRunWizardHasRun && $scope.services.data.length === 1){
+            //$scope.modalAddApp();
+        //}
+    //});
 
     //register polls
     resourcesService.registerPoll("deployingApps", pollDeploying, 3000);
-    resourcesService.registerPoll("serviceHealth", $serviceHealth.update, 3000);
+    //resourcesService.registerPoll("serviceHealth", $serviceHealth.update, 3000);
 }
