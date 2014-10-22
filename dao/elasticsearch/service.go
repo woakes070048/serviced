@@ -14,9 +14,15 @@
 package elasticsearch
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/datastore"
 	"github.com/control-center/serviced/domain/service"
+	"github.com/control-center/serviced/domain/servicestate"
+	"github.com/control-center/serviced/zzk"
+	zkservice "github.com/control-center/serviced/zzk/service"
 	"github.com/zenoss/glog"
 )
 
@@ -117,6 +123,107 @@ func (this *ControlPlaneDao) StartService(serviceID string, unused *string) erro
 // restart the provided service
 func (this *ControlPlaneDao) RestartService(serviceID string, unused *int) error {
 	return this.facade.RestartService(datastore.Get(), serviceID)
+}
+
+// synchronous pause across all running services
+func (this *ControlPlaneDao) PauseServices(timeout time.Duration, unused *int) error {
+	type status struct {
+		id  string
+		err error
+	}
+
+	cancel := make(chan interface{})
+	processing := make(map[string]struct{})
+	done := make(chan status)
+
+	var svcs []service.Service
+	if err := this.GetServices(dao.ServiceRequest{}, &svcs); err != nil {
+		glog.Errorf("Could not get all services: %s", err)
+		return err
+	}
+
+	for _, svc := range svcs {
+		// pause only running service instances
+		if svc.DesiredState == service.SVCRun {
+			processing[svc.ID] = struct{}{}
+
+			go func(id string) {
+				if err := this.facade.PauseService(datastore.Get(), id); err != nil {
+					done <- status{id, err}
+					return
+				}
+
+				conn, err := zzk.GetLocalConnection(zzk.GeneratePoolPath(svc.PoolID))
+				if err != nil {
+					done <- status{id, err}
+					return
+				}
+
+				var states []servicestate.ServiceState
+				if err := this.GetServiceStates(svc.ID, &states); err != nil {
+					done <- status{id, err}
+					return
+				}
+
+				for _, state := range states {
+					if err := zkservice.WaitPause(cancel, conn, id, state.ID); err != nil {
+						err = fmt.Errorf("could not pause instance %s (%s): %s", state.ID, id, err)
+						done <- status{id, err}
+						return
+
+					}
+					select {
+					case <-cancel:
+						err = fmt.Errorf("action cancelled")
+						done <- status{id, err}
+						return
+					default:
+					}
+				}
+			}(svc.ID)
+		}
+	}
+
+	timeoutC := time.After(timeout)
+	defer func() {
+		for len(processing) > 0 {
+			delete(processing, (<-done).id)
+		}
+	}()
+	for len(processing) > 0 {
+		select {
+		case status := <-done:
+			delete(processing, (<-done).id)
+			if status.err != nil {
+				close(cancel)
+				return status.err
+			}
+		case <-timeoutC:
+			close(cancel)
+			return fmt.Errorf("timeout")
+		}
+	}
+	return nil
+}
+
+// resumes all paused services
+func (this *ControlPlaneDao) ResumeServices(request dao.EntityRequest, unused *int) error {
+	var svcs []service.Service
+	if err := this.GetServices(dao.ServiceRequest{}, &svcs); err != nil {
+		glog.Errorf("Could not get all services: %s", err)
+		return err
+	}
+
+	for _, svc := range svcs {
+		if svc.DesiredState == service.SVCPause {
+			if err := this.StartService(svc.ID, nil); err != nil {
+				glog.Warningf("Could not resume service %s (%s): %s", svc.Name, svc.ID, err)
+				continue
+			}
+		}
+	}
+
+	return nil
 }
 
 // stop the provided service

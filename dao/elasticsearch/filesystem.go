@@ -16,6 +16,7 @@ package elasticsearch
 import (
 	"fmt"
 
+	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/datastore"
 	"github.com/control-center/serviced/volume"
 
@@ -57,6 +58,20 @@ func (this *ControlPlaneDao) DeleteSnapshots(serviceID string, unused *int) erro
 func (this *ControlPlaneDao) Rollback(snapshotID string, unused *int) error {
 	this.dfs.Lock()
 	defer this.dfs.Unlock()
+
+	// fail if there are any running instances
+	var rss []dao.RunningService
+	if err := this.GetRunningServices(dao.ServiceRequest{}, &rss); err != nil {
+		glog.Errorf("Could not acquire the list of running services: %s", err)
+		return err
+	} else if count := len(rss); count > 0 {
+		err := fmt.Errorf("found %d running instances", count)
+		for _, rs := range rss {
+			glog.Warningf("Instance %s for %s (%s) is still running", rs.ID, rs.Name, rs.ServiceID)
+		}
+		return err
+	}
+
 	return this.dfs.Rollback(snapshotID)
 }
 

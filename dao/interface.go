@@ -114,6 +114,12 @@ type ControlPlane interface {
 	// Schedule the given service to start
 	StartService(serviceId string, unused *string) error
 
+	// Pause all running services
+	PauseServices(timeout time.Duration, unused *int) error
+
+	// Schedule the given service to resume
+	ResumeServices(request EntityRequest, unused *int) error
+
 	// Schedule the given service to restart
 	RestartService(serviceId string, unused *int) error
 

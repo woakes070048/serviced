@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"time"
 
 	"github.com/control-center/serviced/dao"
 	"github.com/control-center/serviced/domain"
@@ -155,6 +156,14 @@ func (s *ControlClient) RestartService(serviceId string, unused *int) (err error
 
 func (s *ControlClient) StopService(serviceId string, unused *int) (err error) {
 	return s.rpcClient.Call("ControlPlane.StopService", serviceId, unused)
+}
+
+func (s *ControlClient) PauseServices(timeout time.Duration, unused *int) (err error) {
+	return s.rpcClient.Call("ControlPlane.PauseServices", timeout, unused)
+}
+
+func (s *ControlClient) ResumeServices(request dao.EntityRequest, unused *int) (err error) {
+	return s.rpcClient.Call("ControlPlane.ResumeServices", request, unused)
 }
 
 func (s *ControlClient) UpdateServiceState(state servicestate.ServiceState, unused *int) (err error) {

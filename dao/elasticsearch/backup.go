@@ -14,6 +14,7 @@
 package elasticsearch
 
 import (
+	"github.com/control-center/serviced/dao"
 	"github.com/zenoss/glog"
 
 	"fmt"
@@ -58,6 +59,20 @@ func (this *ControlPlaneDao) AsyncBackup(dirpath string, filename *string) error
 func (this *ControlPlaneDao) Restore(filename string, unused *int) error {
 	this.dfs.Lock()
 	defer this.dfs.Unlock()
+
+	// fail if there are any running instances
+	var rss []dao.RunningService
+	if err := this.GetRunningServices(dao.ServiceRequest{}, &rss); err != nil {
+		glog.Errorf("Could not acquire the list of running services: %s", err)
+		return err
+	} else if count := len(rss); count > 0 {
+		err := fmt.Errorf("found %d running instances", count)
+		for _, rs := range rss {
+			glog.Warningf("Instance %s for %s (%s) is still running", rs.ID, rs.Name, rs.ServiceID)
+		}
+		return err
+	}
+
 	return this.dfs.Restore(filename)
 }
 

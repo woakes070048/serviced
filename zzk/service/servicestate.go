@@ -80,7 +80,9 @@ func WaitPause(shutdown <-chan interface{}, conn client.Connection, serviceID, s
 	for {
 		var node ServiceStateNode
 		event, err := conn.GetW(servicepath(serviceID, stateID), &node)
-		if err != nil {
+		if err == client.ErrNoNode {
+			return nil
+		} else if err != nil {
 			return err
 		}
 		if node.IsPaused() {

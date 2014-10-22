@@ -25,12 +25,9 @@ import (
 	"time"
 
 	"github.com/control-center/serviced/dao"
-	"github.com/control-center/serviced/datastore"
 	"github.com/control-center/serviced/domain/service"
 	"github.com/control-center/serviced/domain/servicetemplate"
-	"github.com/control-center/serviced/facade"
-	"github.com/control-center/serviced/zzk"
-	zkservice "github.com/control-center/serviced/zzk/service"
+
 	"github.com/zenoss/glog"
 )
 
@@ -73,16 +70,16 @@ func (dfs *DistributedFilesystem) Backup(dirpath string) (string, error) {
 	}
 
 	// retrieve services
-	svcs, err := dfs.facade.GetServices(datastore.Get(), dao.ServiceRequest{})
-	if err != nil {
+	var svcs []service.Service
+	if err := dfs.client.GetServices(dao.ServiceRequest{}, &svcs); err != nil {
 		glog.Errorf("Could not get services: %s", err)
 		return "", err
 	}
 
 	// export all template definitions
 	dfs.log("Exporting template definitions")
-	templates, err := dfs.facade.GetServiceTemplates(datastore.Get())
-	if err != nil {
+	templates := make(map[string]servicetemplate.ServiceTemplate)
+	if err := dfs.client.GetServiceTemplates(0, &templates); err != nil {
 		glog.Errorf("Could not get service templates: %s", err)
 		return "", err
 	}
@@ -129,37 +126,6 @@ func (dfs *DistributedFilesystem) Backup(dirpath string) (string, error) {
 }
 
 func (dfs *DistributedFilesystem) Restore(filename string) error {
-	// fail if any services are running
-	dfs.log("Checking running services")
-	svcs, err := dfs.facade.GetServices(datastore.Get(), dao.ServiceRequest{})
-	if err != nil {
-		glog.Errorf("Could not acquire the list of all services: %s", err)
-		return err
-	}
-
-	for _, svc := range svcs {
-		conn, err := zzk.GetLocalConnection(zzk.GeneratePoolPath(svc.PoolID))
-		if err != nil {
-			glog.Errorf("Could not acquire connection to coordinator (%s): %s", svc.PoolID, err)
-			return err
-		}
-		if states, err := zkservice.GetServiceStates(conn, svc.ID); err != nil {
-			glog.Errorf("Could not look up running instances for %s (%s): %s", svc.Name, svc.ID, err)
-			return err
-		} else if running := len(states); running > 0 {
-			err := fmt.Errorf("service %s (%s) has %d running instances", svc.Name, svc.ID, running)
-			glog.Errorf("Cannot restore to %s: %s", filename, err)
-			return err
-		}
-	}
-
-	var reloadLogstashContainer bool
-	defer func() {
-		if reloadLogstashContainer {
-			go facade.LogstashContainerReloader(datastore.Get(), dfs.facade) // don't block main thread
-		}
-	}()
-
 	dirpath := filepath.Join(getHome(), "restore")
 	if err := os.RemoveAll(dirpath); err != nil {
 		glog.Errorf("Could not remove %s: %s", dirpath, err)
@@ -194,11 +160,10 @@ func (dfs *DistributedFilesystem) Restore(filename string) error {
 	for templateID, template := range templates {
 		glog.V(1).Infof("Restoring service template %s", templateID)
 		template.ID = templateID
-		if err := dfs.facade.UpdateServiceTemplate(datastore.Get(), template); err != nil {
+		if err := dfs.client.UpdateServiceTemplate(template, nil); err != nil {
 			glog.Errorf("Could not restore template %s: %s", templateID, err)
 			return err
 		}
-		reloadLogstashContainer = true
 	}
 	dfs.log("Service template load successful")
 
@@ -305,13 +270,9 @@ func (dfs *DistributedFilesystem) importSnapshots(filename string) error {
 		return err
 	}
 
-	tenant, err := dfs.facade.GetService(datastore.Get(), tenantID)
-	if err != nil {
+	var tenant service.Service
+	if err := dfs.client.GetService(tenantID, &tenant); err != nil {
 		glog.Errorf("Could not find service %s for snapshot %s: %s", tenantID, snapshotID, err)
-		return err
-	} else if tenant == nil {
-		err = fmt.Errorf("service not found")
-		glog.Errorf("Service %s not found", tenantID)
 		return err
 	}
 
