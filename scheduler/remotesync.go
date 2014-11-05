@@ -14,180 +14,116 @@
 package scheduler
 
 import (
+	"time"
+
 	"github.com/control-center/serviced/coordinator/client"
-	"github.com/control-center/serviced/datastore"
-	"github.com/control-center/serviced/domain/host"
 	"github.com/control-center/serviced/domain/pool"
-	"github.com/control-center/serviced/domain/service"
+	localsync "github.com/control-center/serviced/scheduler/sync"
+	"github.com/control-center/serviced/sync"
 	"github.com/control-center/serviced/zzk"
 	"github.com/control-center/serviced/zzk/registry"
-	zkservice "github.com/control-center/serviced/zzk/service"
+	zkpool "github.com/control-center/serviced/zzk/service"
 	"github.com/zenoss/glog"
 )
 
-func (s *scheduler) startRemote(cancel <-chan struct{}, remote, local client.Connection) <-chan interface{} {
-	var (
-		shutdown = make(chan interface{})
-		done     = make(chan interface{})
-	)
+func remoteSyncEndpoints(remote, local client.Connection) bool {
+	keys, err := new(registry.EndpointSource).KeySource(remote).Get()
+	if err != nil {
+		glog.Errorf("Could not look up remote endpoints: %s", err)
+		return false
+	}
 
-	// wait to receieve a cancel channel or a done channel and shutdown
-	go func() {
-		defer close(shutdown)
-		select {
-		case <-cancel:
-		case <-done:
+	ok := true
+	for _, key := range keys {
+		endpoints, err := new(registry.EndpointSource).Init(remote, key.GetID()).Get()
+		if err != nil {
+			glog.Errorf("Could not look up remote endpoints for key %s: %s", key.GetID(), err)
+			ok = false
+		} else if pass := sync.Synchronize(endpoints, new(registry.EndpointSource).Init(local, key.GetID())); !pass {
+			glog.Errorf("Could not synchronize endpoints for key %s", key.GetID())
+			ok = false
 		}
-	}()
-
-	// start the listeners and wait for shutdown or for something to break
-	go func() {
-		defer close(done)
-		glog.Infof("Remote connection established; synchronizing")
-		zzk.Start(shutdown, remote, nil, s.getPoolSynchronizer(), s.getEndpointSynchronizer(local))
-		glog.Warningf("Running in disconnected mode")
-	}()
-
-	// indicate when the listeners a finished
-	return done
+	}
+	return ok
 }
 
-func (s *scheduler) monitorRemote(shutdown <-chan interface{}, remote, local client.Connection) {
-	var done <-chan interface{}
-	_shutdown := make(chan interface{})
-	cancel := make(chan struct{})
-
-	defer func() {
-		close(_shutdown)
-		close(cancel)
-		select {
-		case <-done:
-		}
-	}()
-
-	// monitor the leader's realm
-	ch := zzk.MonitorRealm(_shutdown, remote, "/scheduler")
+func (s *scheduler) remoteSync(shutdown <-chan interface{}, retry time.Duration) {
 	for {
-		select {
-		case realm := <-ch:
-			switch realm {
-			case "":
-				// empty realm means something bad happened; exit
-				return
-			case s.realm:
-				// remote realm is the same as local realm; disconnect
-				// from the master until this changes
-				if done != nil {
-					cancel <- struct{}{}
-					<-done
-					done = nil
+		conn, err := zzk.GetLocalConnection("/")
+		if err != nil {
+			glog.Errorf("Could not establish a local connection to zookeeper: %s", err)
+			return
+		}
+
+		var masterPool pool.ResourcePool
+		event, err := zkpool.WatchResourcePool(conn, s.poolID, &masterPool)
+		if err != nil {
+			glog.Errorf("Could not monitor master resource pool %s: %s", s.poolID, err)
+			return
+		}
+
+		ok := func() bool {
+			remote, err := zzk.GetRemoteConnection("/")
+			if err != nil {
+				return false
+			}
+
+			// synchronize endpoints
+			ok := remoteSyncEndpoints(remote, conn)
+
+			// synchronize resource pools
+			pools, err := zkpool.GetResourcePoolsByRealm(remote, masterPool.Realm)
+			if err != nil {
+				glog.Errorf("Could not get resource pools for realm %s: %s", masterPool.Realm, err)
+				ok = false
+			}
+			for _, pool := range pools {
+				remote, err := zzk.GetRemoteConnection(zzk.GeneratePoolPath(pool.ID))
+				if err != nil {
+					glog.Warningf("Could not acquire a remote pool-based connection to the master %s: %s", pool.ID, err)
+					return false
 				}
-			default:
-				// start remote synchonization if not yet started
-				if done == nil {
-					done = s.startRemote(cancel, remote, local)
+
+				hosts, err := zkpool.GetHosts(remote)
+				if err != nil {
+					glog.Errorf("Could not search for hosts in pool %s: %s", pool.ID, err)
+					ok = false
+				} else if pass := sync.Synchronize(localsync.ConvertHosts(hosts), new(localsync.FacadeHostSource).Init(s.facade, pool.ID)); !pass {
+					glog.Errorf("Could not synchronize hosts in pool %s: %s", pool.ID, err)
+					ok = false
+				}
+
+				svcs, err := zkpool.GetServices(remote)
+				if err != nil {
+					glog.Errorf("Could not search for services in pool %s: %s", pool.ID, err)
+					ok = false
+				} else if pass := sync.Synchronize(localsync.ConvertServices(svcs), new(localsync.FacadeServiceSource).Init(s.facade, pool.ID)); !pass {
+					glog.Errorf("Could not synchronize services in pool %s: %s", pool.ID, err)
+					ok = false
 				}
 			}
-		case <-done:
-			// synchronization failed; shutdown
-			return
-		case <-shutdown:
-			// receieved signal to shutdown
-			return
-		}
-	}
-}
 
-func (s *scheduler) remoteSync(shutdown <-chan interface{}, local client.Connection) {
-	for {
-		select {
-		case remote := <-zzk.Connect("/", zzk.GetRemoteConnection):
-			if remote != nil {
-				s.monitorRemote(shutdown, remote, local)
+			if pass := sync.Synchronize(localsync.ConvertResourcePools(pools), new(localsync.FacadePoolSource).Init(s.facade, masterPool.Realm)); !pass {
+				glog.Errorf("Could not synchronize resource pools for realm %s", masterPool.Realm)
+				ok = false
 			}
-		case <-shutdown:
-			return
+
+			return ok
+		}()
+
+		var wait <-chan time.Time
+		if !ok {
+			glog.Errorf("Could not synchronize, retrying")
+			wait = time.After(minRetry)
+		} else {
+			wait = time.After(retry)
 		}
 
 		select {
+		case <-event:
+		case <-wait:
 		case <-shutdown:
 			return
-		default:
-			// probably lost connection to the remote; try again
 		}
 	}
-}
-
-func (s *scheduler) getPoolSynchronizer() zzk.Listener {
-	poolSync := zkservice.NewPoolSynchronizer(s, zzk.GetRemoteConnection)
-
-	// Add the host listener
-	poolSync.AddListener(func(id string) zzk.Listener {
-		return zkservice.NewHostSynchronizer(s, id)
-	})
-
-	// Add the service listener
-	poolSync.AddListener(func(id string) zzk.Listener {
-		return zkservice.NewServiceSynchronizer(s, id)
-	})
-
-	return poolSync
-}
-
-func (s *scheduler) getEndpointSynchronizer(local client.Connection) zzk.Listener {
-	return registry.NewEndpointSynchronizer(local, s.registry, zzk.GetRemoteConnection)
-}
-
-func (s *scheduler) GetResourcePools() ([]*pool.ResourcePool, error) {
-	return s.facade.GetResourcePools(datastore.Get())
-}
-
-func (s *scheduler) AddUpdateResourcePool(pool *pool.ResourcePool) error {
-	if p, err := s.facade.GetResourcePool(datastore.Get(), pool.ID); err != nil {
-		return err
-	} else if p == nil {
-		return s.facade.AddResourcePool(datastore.Get(), pool)
-	}
-
-	return s.facade.UpdateResourcePool(datastore.Get(), pool)
-}
-
-func (s *scheduler) RemoveResourcePool(id string) error {
-	return s.facade.RemoveResourcePool(datastore.Get(), id)
-}
-
-func (s *scheduler) GetServicesByPool(id string) ([]service.Service, error) {
-	return s.facade.GetServicesByPool(datastore.Get(), id)
-}
-
-func (s *scheduler) AddUpdateService(svc *service.Service) error {
-	if sv, err := s.facade.GetService(datastore.Get(), svc.ID); err != nil {
-		return err
-	} else if sv == nil {
-		return s.facade.AddService(datastore.Get(), *svc)
-	}
-
-	return s.facade.UpdateService(datastore.Get(), *svc)
-}
-
-func (s *scheduler) RemoveService(id string) error {
-	return s.facade.RemoveService(datastore.Get(), id)
-}
-
-func (s *scheduler) GetHostsByPool(id string) ([]*host.Host, error) {
-	return s.facade.FindHostsInPool(datastore.Get(), id)
-}
-
-func (s *scheduler) AddUpdateHost(host *host.Host) error {
-	if h, err := s.facade.GetHost(datastore.Get(), host.ID); err != nil {
-		return err
-	} else if h == nil {
-		return s.facade.AddHost(datastore.Get(), host)
-	}
-
-	return s.facade.UpdateHost(datastore.Get(), host)
-}
-
-func (s *scheduler) RemoveHost(id string) error {
-	return s.facade.RemoveHost(datastore.Get(), id)
 }

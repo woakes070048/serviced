@@ -102,6 +102,22 @@ func (s *Store) GetServicesByPool(ctx datastore.Context, poolID string) ([]Servi
 	return convert(results)
 }
 
+// GetServicesByNameRegex returns services that matches a particular name regex
+func (s *Store) GetServicesByNameRegex(ctx datastore.Context, nameRegex string) ([]Service, error) {
+	if nameRegex = strings.TrimSpace(nameRegex); nameRegex == "" {
+		return nil, errors.New("empty name regex not allowed")
+	}
+	query := search.Facet().Regex("Name", nameRegex)
+	search := search.Search("controlplane").Type(kind).Size("50000").Facet(query)
+
+	q := datastore.NewQuery(ctx)
+	results, err := q.Execute(search)
+	if err != nil {
+		return nil, err
+	}
+	return convert(results)
+}
+
 //GetServicesByDeployment returns services with the given deployment id
 func (s *Store) GetServicesByDeployment(ctx datastore.Context, deploymentID string) ([]Service, error) {
 	id := strings.TrimSpace(deploymentID)

@@ -39,6 +39,7 @@ func (s ControlPlaneError) Error() string {
 type EntityRequest interface{}
 
 type ServiceRequest struct {
+	PoolID       string
 	Tags         []string
 	TenantID     string
 	UpdatedSince time.Duration

@@ -15,6 +15,7 @@ package scheduler
 
 import (
 	"sync"
+	"time"
 
 	coordclient "github.com/control-center/serviced/coordinator/client"
 	"github.com/control-center/serviced/dao"
@@ -146,14 +147,14 @@ func (s *scheduler) mainloop(conn coordclient.Connection) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.remoteSync(_shutdown, conn)
+		s.remoteSync(_shutdown, time.Minute)
 	}()
 
 	// synchronize locally
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.localSync(_shutdown, conn)
+		s.localSync(_shutdown, 3*time.Hour)
 	}()
 
 	wg.Add(1)

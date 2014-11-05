@@ -4,14 +4,15 @@
 package web
 
 import (
-	"github.com/zenoss/glog"
-	"github.com/zenoss/go-json-rest"
 	"github.com/control-center/serviced/domain"
 	"github.com/control-center/serviced/domain/pool"
 	"github.com/control-center/serviced/rpc/master"
+	"github.com/zenoss/glog"
+	"github.com/zenoss/go-json-rest"
+
+	"net/url"
 
 	"github.com/control-center/serviced/dao"
-	"net/url"
 )
 
 //restGetPools retrieves all Resource Pools. Response is map[pool-id]ResourcePool
@@ -28,20 +29,20 @@ func restGetPools(w *rest.ResponseWriter, r *rest.Request, ctx *requestContext) 
 		restServerError(w, err)
 		return
 	}
-	poolsMap := make(map[string]*pool.ResourcePool)
-	for _, pool := range pools {
-		hostIDs, err := getPoolHostIds(pool.ID, client)
+	poolsMap := make(map[string]pool.ResourcePool)
+	for i := range pools {
+		hostIDs, err := getPoolHostIds(pools[i].ID, client)
 		if err != nil {
 			restServerError(w, err)
 			return
 		}
 
-		if err := buildPoolMonitoringProfile(pool, hostIDs, client); err != nil {
+		if err := buildPoolMonitoringProfile(&pools[i], hostIDs, client); err != nil {
 			restServerError(w, err)
 			return
 		}
 
-		poolsMap[pool.ID] = pool
+		poolsMap[pools[i].ID] = pools[i]
 	}
 	glog.V(4).Infof("restGetPools: pools %#v", poolsMap)
 	w.WriteJson(&poolsMap)

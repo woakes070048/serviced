@@ -33,13 +33,13 @@ type API interface {
 	StartProxy(ControllerOptions) error
 
 	// Hosts
-	GetHosts() ([]*host.Host, error)
+	GetHosts() ([]host.Host, error)
 	GetHost(string) (*host.Host, error)
 	AddHost(HostConfig) (*host.Host, error)
 	RemoveHost(string) error
 
 	// Pools
-	GetResourcePools() ([]*pool.ResourcePool, error)
+	GetResourcePools() ([]pool.ResourcePool, error)
 	GetResourcePool(string) (*pool.ResourcePool, error)
 	AddResourcePool(PoolConfig) (*pool.ResourcePool, error)
 	RemoveResourcePool(string) error

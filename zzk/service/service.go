@@ -52,19 +52,9 @@ type ServiceNode struct {
 	version interface{}
 }
 
-// ID implements zzk.Node
-func (node *ServiceNode) GetID() string {
+// ID implements sync.Datum
+func (node ServiceNode) GetID() string {
 	return node.ID
-}
-
-// Create implements zzk.Node
-func (node *ServiceNode) Create(conn client.Connection) error {
-	return UpdateService(conn, node.Service)
-}
-
-// Update implements zzk.Node
-func (node *ServiceNode) Update(conn client.Connection) error {
-	return UpdateService(conn, node.Service)
 }
 
 // Version implements client.Node
@@ -101,9 +91,6 @@ func (l *ServiceListener) Ready() (err error) { return }
 
 // Done implements zzk.Listener
 func (l *ServiceListener) Done() { return }
-
-// PostProcess implements zzk.Listener
-func (l *ServiceListener) PostProcess(p map[string]struct{}) {}
 
 // Spawn watches a service and syncs the number of running instances
 func (l *ServiceListener) Spawn(shutdown <-chan interface{}, serviceID string) {
@@ -352,13 +339,23 @@ func StopService(conn client.Connection, serviceID string) error {
 	return conn.Set(path, &node)
 }
 
-// SyncServices synchronizes all services into zookeeper
-func SyncServices(conn client.Connection, services []service.Service) error {
-	nodes := make([]zzk.Node, len(services))
-	for i := range services {
-		nodes[i] = &ServiceNode{Service: &services[i]}
+// GetServices returns all services
+func GetServices(conn client.Connection) ([]service.Service, error) {
+	nodes, err := conn.Children(servicepath())
+	if err != nil {
+		return nil, err
 	}
-	return zzk.Sync(conn, nodes, servicepath())
+
+	svcs := make([]service.Service, len(nodes))
+	for i, id := range nodes {
+		var node ServiceNode
+		if err := conn.Get(servicepath(id), &node); err != nil {
+			return nil, err
+		}
+		svcs[i] = *node.Service
+	}
+
+	return svcs, nil
 }
 
 // UpdateService updates a service node if it exists, otherwise creates it

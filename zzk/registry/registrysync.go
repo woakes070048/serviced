@@ -14,192 +14,154 @@
 package registry
 
 import (
-	"fmt"
 	"path"
 
 	"github.com/control-center/serviced/coordinator/client"
-	"github.com/control-center/serviced/zzk"
-	"github.com/zenoss/glog"
+	"github.com/control-center/serviced/sync"
 )
 
-// KeySynchronizer synchronizes keys in the registry
-type KeySynchronizer struct {
-	conn          client.Connection
-	registry      *registryType
-	getConnection zzk.GetConnection
+func ConvertKeys(keys []KeyNode) []sync.Datum {
+	data := make([]sync.Datum, len(keys))
+	for i, key := range keys {
+		data[i] = key
+	}
+	return data
 }
 
-// Allocate implements zzk.SyncHandler
-func (l *KeySynchronizer) Allocate() zzk.Node { return &KeyNode{} }
-
-// GetConnection implements zzk.SyncHandler
-func (l *KeySynchronizer) GetConnection(path string) (client.Connection, error) {
-	return l.getConnection("/")
+type KeySource struct {
+	conn client.Connection
+	path string
 }
 
-// GetPath implements zzk.SyncHandler
-func (l *KeySynchronizer) GetPath(nodes ...string) string { return l.registry.getPath(nodes...) }
+func (source *KeySource) Init(conn client.Connection, path string) sync.Source {
+	return &KeySource{conn, path}
+}
 
-// Ready implements zzk.SyncHandler
-func (l *KeySynchronizer) Ready() error { return nil }
-
-// Done implements zzk.SyncHandler
-func (l *KeySynchronizer) Done() {}
-
-// GetAll implements zzk.SyncHandler
-func (l *KeySynchronizer) GetAll() ([]zzk.Node, error) {
-	children, err := l.conn.Children(l.registry.getPath())
+func (source *KeySource) Get() ([]sync.Datum, error) {
+	nodes, err := source.conn.Children(source.path)
 	if err != nil {
 		return nil, err
 	}
 
-	var nodes []zzk.Node
-	for _, nodeID := range children {
+	data := make([]sync.Datum, len(nodes))
+	for i, key := range nodes {
 		var node KeyNode
-		if err := l.conn.Get(l.registry.getPath(nodeID), &node); err != nil {
+		if err := source.conn.Get(path.Join(source.path, key), &node); err != nil {
 			return nil, err
-		} else if node.IsRemote {
-			nodes = append(nodes, &node)
 		}
+		data[i] = node
 	}
 
-	return nodes, nil
+	return data, nil
 }
 
-func (l *KeySynchronizer) addkey(key string) error {
-	var node KeyNode
-	path := l.registry.getPath(key)
-	if err := l.conn.Create(l.registry.getPath(key), &node); err != nil {
+func (source *KeySource) Add(datum sync.Datum) error {
+	keypath := path.Join(source.path, datum.GetID())
+
+	key, ok := datum.(KeyNode)
+	if !ok {
+		return sync.ErrBadType
+	}
+	key.IsRemote = true
+	if err := source.conn.Create(keypath, &key); err != nil {
 		return err
 	}
-	node.ID = key
-	node.IsRemote = true
-	return l.conn.Set(path, &node)
+	return source.conn.Set(keypath, &key)
 }
 
-func (l *KeySynchronizer) updatekey(key string) error {
-	var node KeyNode
-	path := l.registry.getPath(key)
-	if err := l.conn.Get(path, &node); err != nil {
-		return err
+func (source *KeySource) Update(datum sync.Datum) error {
+	keypath := path.Join(source.path, datum.GetID())
+
+	key, ok := datum.(KeyNode)
+	if !ok {
+		return sync.ErrBadType
 	}
-
-	if !node.IsRemote {
-		if children, err := l.conn.Children(path); err != nil {
-			return err
-		} else if count := len(children); count > 0 {
-			return fmt.Errorf("cannot update %s: found %d items", key, count)
-		}
-	}
-
-	node.ID = key
-	node.IsRemote = true
-	return l.conn.Set(path, &node)
-}
-
-// AddUpdate implements zzk.SyncHandler
-func (l *KeySynchronizer) AddUpdate(_ string, node zzk.Node) (string, error) {
-	exists, err := zzk.PathExists(l.conn, l.registry.getPath(node.GetID()))
-
-	if err != nil {
-		return "", err
-	}
-
-	if exists {
-		err = l.updatekey(node.GetID())
-	} else {
-		err = l.addkey(node.GetID())
-	}
-
-	if err != nil {
-		return "", err
-	}
-
-	return node.GetID(), nil
-}
-
-// Delete implements zzk.SyncHandler
-func (l *KeySynchronizer) Delete(id string) error {
-	return l.conn.Delete(l.registry.getPath(id))
-}
-
-// EndpointSynchronizer synchronizes the EndpointRegistry
-type EndpointSynchronizer struct {
-	conn     client.Connection
-	registry *EndpointRegistry
-	key      string
-}
-
-// NewEndpointSynchronizer instiates a new synchronizer for the EndpointRegistry
-func NewEndpointSynchronizer(local client.Connection, registry *EndpointRegistry, getRemoteConnection zzk.GetConnection) *zzk.Synchronizer {
-	eSync := &KeySynchronizer{local, &registry.registryType, getRemoteConnection}
-	sync := zzk.NewSynchronizer(eSync)
-
-	sync.AddListener(func(key string) zzk.Listener {
-		iSync := &EndpointSynchronizer{local, registry, key}
-		return zzk.NewSynchronizer(iSync)
-	})
-
-	return sync
-}
-
-// Allocate implements zzk.SyncHandler
-func (l *EndpointSynchronizer) Allocate() zzk.Node { return &EndpointNode{} }
-
-// GetConnection implements zzk.SyncHandler
-func (l *EndpointSynchronizer) GetConnection(path string) (client.Connection, error) { return nil, nil }
-
-// GetPath implements zzk.SyncHandler
-func (l *EndpointSynchronizer) GetPath(nodes ...string) string {
-	return l.registry.getPath(append([]string{l.key}, nodes...)...)
-}
-
-// Ready implements zzk.SyncHandler
-func (l *EndpointSynchronizer) Ready() error {
-	children, err := l.conn.Children(l.GetPath())
-	if err != nil {
+	key.IsRemote = true
+	if _, err := source.conn.Exists(keypath); err != nil {
 		return err
 	}
 
-	for _, id := range children {
-		if err := l.Delete(id); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return source.conn.Set(keypath, &key)
 }
 
-// Done implements zzk.SyncHandler
-func (l *EndpointSynchronizer) Done() {}
+func (source *KeySource) Delete(id string) error {
+	keypath := path.Join(source.path, id)
 
-// GetAll implements zzk.SyncHandler
-func (l *EndpointSynchronizer) GetAll() ([]zzk.Node, error) { return []zzk.Node{}, nil }
-
-// AddUpdate implements zzk.SyncHandler
-func (l *EndpointSynchronizer) AddUpdate(id string, node zzk.Node) (string, error) {
-	var (
-		ep  string
-		err error
-	)
-
-	if endpoint, ok := node.(*EndpointNode); !ok {
-		glog.Errorf("Could not extract endpoint node data for %s", id)
-		return "", zzk.ErrInvalidType
-	} else if id == "" {
-		ep, err = l.registry.SetItem(l.conn, *endpoint)
-	} else {
-		ep, err = l.registry.setItem(l.conn, l.key, id, endpoint)
+	var key KeyNode
+	if err := source.conn.Get(keypath, &key); err == client.ErrNoNode || !key.IsRemote {
+		return nil
+	} else if err != nil {
+		return err
 	}
 
+	return source.conn.Delete(keypath)
+}
+
+func ConvertEndpoints(endpoints []EndpointNode) []sync.Datum {
+	data := make([]sync.Datum, len(endpoints))
+	for i, ep := range endpoints {
+		data[i] = ep
+	}
+	return data
+}
+
+type EndpointSource struct {
+	conn client.Connection
+	key  string
+}
+
+func (source *EndpointSource) KeySource(conn client.Connection) sync.Source {
+	return new(KeySource).Init(conn, zkEndpoints)
+}
+
+func (source *EndpointSource) Init(conn client.Connection, key string) sync.Source {
+	return &EndpointSource{conn, key}
+}
+
+func (source *EndpointSource) Get() ([]sync.Datum, error) {
+	nodes, err := source.conn.Children(path.Join(zkEndpoints, source.key))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return path.Base(ep), nil
+	data := make([]sync.Datum, len(nodes))
+	for i, id := range nodes {
+		var node EndpointNode
+		if err := source.conn.Get(path.Join(zkEndpoints, source.key, id), &node); err != nil {
+			return nil, err
+		}
+		data[i] = node
+	}
+
+	return data, nil
 }
 
-// Delete implements zzk.SyncHandler
-func (l *EndpointSynchronizer) Delete(id string) error {
-	return l.registry.removeItem(l.conn, l.key, id)
+func (source *EndpointSource) Add(datum sync.Datum) error {
+	epath := path.Join(zkEndpoints, source.key, datum.GetID())
+
+	ep, ok := datum.(EndpointNode)
+	if !ok {
+		return sync.ErrBadType
+	}
+	if err := source.conn.Create(epath, &ep); err != nil {
+		return err
+	}
+	return source.conn.Set(epath, &ep)
+}
+
+func (source *EndpointSource) Update(datum sync.Datum) error {
+	epath := path.Join(zkEndpoints, source.key, datum.GetID())
+
+	ep, ok := datum.(EndpointNode)
+	if !ok {
+		return sync.ErrBadType
+	}
+	if _, err := source.conn.Exists(epath); err != nil {
+		return err
+	}
+	return source.conn.Set(epath, &ep)
+}
+
+func (source *EndpointSource) Delete(id string) error {
+	return source.conn.Delete(path.Join(zkEndpoints, source.key, id))
 }

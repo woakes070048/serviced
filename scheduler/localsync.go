@@ -15,78 +15,84 @@ package scheduler
 import (
 	"time"
 
-	"github.com/control-center/serviced/coordinator/client"
+	"github.com/control-center/serviced/dao"
+	"github.com/control-center/serviced/datastore"
 	"github.com/control-center/serviced/zzk"
-	zkservice "github.com/control-center/serviced/zzk/service"
-	zkvirtualips "github.com/control-center/serviced/zzk/virtualips"
+
+	localsync "github.com/control-center/serviced/scheduler/sync"
+	"github.com/control-center/serviced/sync"
 	"github.com/zenoss/glog"
 )
 
-const (
-	minWait = 30 * time.Second
-	maxWait = 3 * time.Hour
-)
+const minRetry = 15 * time.Second
 
-func (s *scheduler) localSync(shutdown <-chan interface{}, rootConn client.Connection) {
-	wait := time.After(0)
-
-retry:
+func (s *scheduler) localSync(shutdown <-chan interface{}, retry time.Duration) {
 	for {
+		ok := func() bool {
+			pools, err := s.facade.GetResourcePools(datastore.Get())
+			if err != nil {
+				glog.Errorf("Could not get resource pools: %s", err)
+				return false
+			}
+
+			ok := true
+			for _, pool := range pools {
+				conn, err := zzk.GetLocalConnection(zzk.GeneratePoolPath(pool.ID))
+				if err != nil {
+					glog.Errorf("Could not acquire a pool-based connection to zookeeper (%s): %s", pool.ID, err)
+					ok = false
+					continue
+				}
+
+				hosts, err := s.facade.FindHostsInPool(datastore.Get(), pool.ID)
+				if err != nil {
+					glog.Errorf("Could not search for hosts in pool %s: %s", pool.ID, err)
+					ok = false
+				} else if pass := sync.Synchronize(localsync.ConvertHosts(hosts), new(localsync.ZKHostSource).Init(conn, 2*time.Minute)); !pass {
+					glog.Errorf("Could not synchronize hosts in pool %s", pool.ID)
+					ok = false
+				}
+
+				svcs, err := s.facade.GetServices(datastore.Get(), dao.ServiceRequest{PoolID: pool.ID})
+				if err != nil {
+					glog.Errorf("Could not search for services in pool %s: %s", pool.ID, err)
+					ok = false
+				} else if pass := sync.Synchronize(localsync.ConvertServices(svcs), new(localsync.ZKServiceSource).Init(conn)); !pass {
+					glog.Errorf("Could not synchronize services in pool %s", pool.ID)
+					ok = false
+				}
+
+				if pass := sync.Synchronize(localsync.ConvertVirtualIPs(pool.VirtualIPs), new(localsync.ZKVirtualIPSource).Init(conn)); !pass {
+					glog.Errorf("Could not synchronize virtual ips in pool %s", pool.ID)
+					ok = false
+				}
+			}
+
+			conn, err := zzk.GetLocalConnection(zzk.GeneratePoolPath("/"))
+			if err != nil {
+				glog.Errorf("Could not acquire a connection to zookeeper: %s", err)
+				ok = false
+			} else if pass := sync.Synchronize(localsync.ConvertResourcePools(pools), new(localsync.ZKPoolSource).Init(conn)); !pass {
+				glog.Errorf("Could not synchronize resource pools: %s", err)
+				ok = false
+			}
+
+			return ok
+		}()
+
+		var wait <-chan time.Time
+		if !ok {
+			glog.Errorf("Could not synchronize, retrying")
+			wait = time.After(minRetry)
+		} else {
+			wait = time.After(retry)
+		}
+
 		select {
 		case <-wait:
+			// pass
 		case <-shutdown:
 			return
 		}
-
-		pools, err := s.GetResourcePools()
-		if err != nil {
-			glog.Errorf("Could not get resource pools: %s", err)
-			wait = time.After(minWait)
-			continue
-		} else if err := zkservice.SyncResourcePools(rootConn, pools); err != nil {
-			glog.Errorf("Could not do a local sync of resource pools: %s", err)
-			wait = time.After(minWait)
-			continue
-		}
-
-		for _, pool := range pools {
-			conn, err := zzk.GetLocalConnection(zzk.GeneratePoolPath(pool.ID))
-			if err != nil {
-				glog.Errorf("Could not get a pool-based connection for %s to zookeeper: %s", pool.ID, err)
-				wait = time.After(minWait)
-				continue retry
-			}
-
-			// Update the hosts
-			if hosts, err := s.GetHostsByPool(pool.ID); err != nil {
-				glog.Errorf("Could not get hosts in pool %s: %s", pool.ID, err)
-				wait = time.After(minWait)
-				continue retry
-			} else if err := zkservice.SyncHosts(conn, hosts); err != nil {
-				glog.Errorf("Could not do a local sync of hosts: %s", err)
-				wait = time.After(minWait)
-				continue retry
-			}
-
-			// Update the services
-			if svcs, err := s.GetServicesByPool(pool.ID); err != nil {
-				glog.Errorf("Could not get services: %s", err)
-				wait = time.After(minWait)
-				continue retry
-			} else if zkservice.SyncServices(conn, svcs); err != nil {
-				glog.Error("Could not do a local sync of services: %s", err)
-				wait = time.After(minWait)
-				continue retry
-			}
-
-			// Update Virtual IPs
-			if err := zkvirtualips.SyncVirtualIPs(conn, pool.VirtualIPs); err != nil {
-				glog.Errorf("Could not sync virtual ips for %s: %s", pool.ID, err)
-				wait = time.After(minWait)
-				continue retry
-			}
-		}
-
-		wait = time.After(maxWait)
 	}
 }

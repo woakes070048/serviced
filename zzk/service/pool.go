@@ -35,19 +35,9 @@ type PoolNode struct {
 	version interface{}
 }
 
-// ID implements zzk.Node
-func (node *PoolNode) GetID() string {
+// GetID implements sync.Datum
+func (node PoolNode) GetID() string {
 	return node.ID
-}
-
-// Create implements zzk.Node
-func (node *PoolNode) Create(conn client.Connection) error {
-	return AddResourcePool(conn, node.ResourcePool)
-}
-
-// Update implements zzk.Node
-func (node *PoolNode) Update(conn client.Connection) error {
-	return nil
 }
 
 // Version implements client.Node
@@ -56,12 +46,38 @@ func (node *PoolNode) Version() interface{} { return node.version }
 // SetVersion implements client.Node
 func (node *PoolNode) SetVersion(version interface{}) { node.version = version }
 
-func SyncResourcePools(conn client.Connection, pools []*pool.ResourcePool) error {
-	nodes := make([]zzk.Node, len(pools))
-	for i := range pools {
-		nodes[i] = &PoolNode{ResourcePool: pools[i]}
+func GetResourcePools(conn client.Connection) ([]pool.ResourcePool, error) {
+	nodes, err := conn.Children(poolpath())
+	if err != nil {
+		return nil, err
 	}
-	return zzk.Sync(conn, nodes, poolpath())
+
+	pools := make([]pool.ResourcePool, len(nodes))
+	for i, poolID := range nodes {
+		var node PoolNode
+		if err := conn.Get(poolpath(poolID), &node); err != nil {
+			return nil, err
+		}
+		pools[i] = *node.ResourcePool
+	}
+
+	return pools, nil
+}
+
+func GetResourcePoolsByRealm(conn client.Connection, realm string) ([]pool.ResourcePool, error) {
+	allpools, err := GetResourcePools(conn)
+	if err != nil {
+		return nil, err
+	}
+
+	var pools []pool.ResourcePool
+	for _, pool := range allpools {
+		if pool.Realm == realm {
+			pools = append(pools, pool)
+		}
+	}
+
+	return pools, nil
 }
 
 func AddResourcePool(conn client.Connection, pool *pool.ResourcePool) error {
@@ -84,6 +100,10 @@ func UpdateResourcePool(conn client.Connection, pool *pool.ResourcePool) error {
 
 func RemoveResourcePool(conn client.Connection, poolID string) error {
 	return conn.Delete(poolpath(poolID))
+}
+
+func WatchResourcePool(conn client.Connection, poolID string, pool *pool.ResourcePool) (<-chan client.Event, error) {
+	return conn.GetW(poolpath(poolID), &PoolNode{ResourcePool: pool})
 }
 
 func MonitorResourcePool(shutdown <-chan interface{}, conn client.Connection, poolID string) <-chan *pool.ResourcePool {

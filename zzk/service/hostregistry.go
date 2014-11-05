@@ -43,19 +43,9 @@ type HostNode struct {
 	version interface{}
 }
 
-// ID implements zzk.Node
-func (node *HostNode) GetID() string {
+// ID implements sync.Datum
+func (node HostNode) GetID() string {
 	return node.ID
-}
-
-// Create implements zzk.Node
-func (node *HostNode) Create(conn client.Connection) error {
-	return AddHost(conn, node.Host)
-}
-
-// Update implements zzk.Node
-func (node *HostNode) Update(conn client.Connection) error {
-	return UpdateHost(conn, node.Host)
 }
 
 // Version implements client.Node
@@ -100,9 +90,6 @@ func (l *HostRegistryListener) Ready() (err error) { return }
 
 // Done shuts down any running processes outside of the main listener, like l.GetHosts()
 func (l *HostRegistryListener) Done() { close(l.shutdown) }
-
-// PostProcess implments zzk.Listener
-func (l *HostRegistryListener) PostProcess(p map[string]struct{}) {}
 
 // Spawn listens on the host registry and waits til the node is deleted to unregister
 func (l *HostRegistryListener) Spawn(shutdown <-chan interface{}, eHostID string) {
@@ -208,12 +195,21 @@ func GetActiveHosts(conn client.Connection, poolID string) ([]string, error) {
 	return hostIDs, nil
 }
 
-func SyncHosts(conn client.Connection, hosts []*host.Host) error {
-	nodes := make([]zzk.Node, len(hosts))
-	for i := range hosts {
-		nodes[i] = &HostNode{Host: hosts[i]}
+func GetHosts(conn client.Connection) ([]host.Host, error) {
+	nodes, err := conn.Children(hostpath())
+	if err != nil {
+		return nil, err
 	}
-	return zzk.Sync(conn, nodes, hostpath())
+
+	hosts := make([]host.Host, len(nodes))
+	for i, hid := range nodes {
+		var node HostNode
+		if err := conn.Get(hostpath(hid), &node); err != nil {
+			return nil, err
+		}
+		hosts[i] = *node.Host
+	}
+	return hosts, nil
 }
 
 func AddHost(conn client.Connection, host *host.Host) error {

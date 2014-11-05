@@ -148,58 +148,70 @@ func (f *Facade) GetService(ctx datastore.Context, id string) (*service.Service,
 	return svc, nil
 }
 
-//
-func (f *Facade) GetServices(ctx datastore.Context, request dao.EntityRequest) ([]service.Service, error) {
+func (f *Facade) GetServices(ctx datastore.Context, request dao.ServiceRequest) ([]service.Service, error) {
 	glog.V(3).Infof("Facade.GetServices")
 	store := f.serviceStore
-	var services []service.Service
-	var err error
-	if request.(dao.ServiceRequest).UpdatedSince != 0 {
-		services, err = store.GetUpdatedServices(ctx, request.(dao.ServiceRequest).UpdatedSince)
-		if err != nil {
-			glog.Error("Facade.GetServices: err=", err)
-			return nil, err
-		}
-	} else {
-		services, err = store.GetServices(ctx)
-		if err != nil {
-			glog.Error("Facade.GetServices: err=", err)
-			return nil, err
-		}
-	}
-	if err = f.fillOutServices(ctx, services); err != nil {
-		return nil, err
-	}
 
-	switch v := request.(type) {
-	case dao.ServiceRequest:
-		glog.V(3).Infof("request: %+v", request)
+	var (
+		svcs []service.Service
+		err  error
+	)
 
-		// filter by the name provided
-		if request.(dao.ServiceRequest).NameRegex != "" {
-			services, err = filterByNameRegex(request.(dao.ServiceRequest).NameRegex, services)
-			if err != nil {
-				glog.Error("Facade.GetTaggedServices: err=", err)
-				return nil, err
-			}
-		}
-
-		// filter by the tenantID provided
-		if request.(dao.ServiceRequest).TenantID != "" {
-			services, err = f.filterByTenantID(ctx, request.(dao.ServiceRequest).TenantID, services)
-			if err != nil {
-				glog.Error("Facade.GetTaggedServices: err=", err)
-				return nil, err
-			}
-		}
-
-		return services, nil
+	switch {
+	case request.PoolID != "":
+		svcs, err = store.GetServicesByPool(ctx, request.PoolID)
+	case request.UpdatedSince > 0:
+		svcs, err = store.GetUpdatedServices(ctx, request.UpdatedSince)
+	case request.NameRegex != "":
+		svcs, err = store.GetServicesByNameRegex(ctx, request.NameRegex)
+	case request.Tags != nil && len(request.Tags) > 0:
+		svcs, err = store.GetTaggedServices(ctx, request.Tags...)
+	case request.TenantID != "":
+		svcs, err = f.GetServiceTree(ctx, request.TenantID)
 	default:
-		err := fmt.Errorf("Bad request type %v: %+v", v, request)
-		glog.V(2).Info("Facade.GetTaggedServices: err=", err)
+		svcs, err = store.GetServices(ctx)
+	}
+
+	if err != nil {
+		return nil, err
+	} else if err := f.fillOutServices(ctx, svcs); err != nil {
 		return nil, err
 	}
-	return services, nil
+
+	return svcs, err
+}
+
+func (f *Facade) GetServiceTree(ctx datastore.Context, serviceID string) ([]service.Service, error) {
+	glog.V(3).Infof("Facade.GetChildServices")
+	store := f.serviceStore
+
+	var svcs []service.Service
+	var setChildren func(parentID string) error
+	setChildren = func(parentID string) error {
+		ss, err := store.GetChildServices(ctx, parentID)
+		if err != nil {
+			return err
+		}
+		svcs = append(svcs, ss...)
+		for _, svc := range ss {
+			if err := setChildren(svc.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if svc, err := store.Get(ctx, serviceID); err != nil {
+		return nil, err
+	} else {
+		svcs = append(svcs, *svc)
+	}
+
+	if err := setChildren(serviceID); err != nil {
+		return nil, err
+	}
+
+	return svcs, nil
 }
 
 // GetServicesByPool looks up all services in a particular pool
