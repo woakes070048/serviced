@@ -451,15 +451,6 @@ func createMuxListener() (net.Listener, error) {
 }
 
 func (d *daemon) startAgent() error {
-	muxListener, err := createMuxListener()
-	if err != nil {
-		return err
-	}
-	mux, err := proxy.NewTCPMux(muxListener)
-	if err != nil {
-		return err
-	}
-
 	agentIP := options.OutboundIP
 	if agentIP == "" {
 		var err error
@@ -467,6 +458,20 @@ func (d *daemon) startAgent() error {
 		if err != nil {
 			glog.Fatalf("Failed to acquire ip address: %s", err)
 		}
+	}
+
+	myHostID, err := utils.HostID()
+	if err != nil {
+		return fmt.Errorf("HostID failed: %v", err)
+	}
+
+	muxListener, err := createMuxListener()
+	if err != nil {
+		return err
+	}
+	mux, err := proxy.NewTCPMux(muxListener, myHostID, agentIP)
+	if err != nil {
+		return err
 	}
 
 	rpcPort := "0"
@@ -478,11 +483,6 @@ func (d *daemon) startAgent() error {
 	thisHost, err := host.Build(agentIP, rpcPort, "unknown")
 	if err != nil {
 		panic(err)
-	}
-
-	myHostID, err := utils.HostID()
-	if err != nil {
-		return fmt.Errorf("HostID failed: %v", err)
 	}
 
 	go func() {
