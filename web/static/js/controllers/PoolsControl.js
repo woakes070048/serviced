@@ -1,4 +1,4 @@
-function PoolsControl($scope, $routeParams, $location, $filter, $timeout, resourcesService, authService, $modalService, $translate) {
+function PoolsControl($scope, $routeParams, $location, $filter, $timeout, resourcesService, authService, $modalService, $translate, $notification){
     // Ensure logged in
     authService.checkLogin($scope);
 
@@ -42,7 +42,6 @@ function PoolsControl($scope, $routeParams, $location, $filter, $timeout, resour
                         resourcesService.remove_pool(poolID, function(data) {
                             refreshPools($scope, resourcesService, false);
                         });
-                        // NOTE: should wait for success before closing
                         this.close();
                     }
                 }
@@ -69,9 +68,14 @@ function PoolsControl($scope, $routeParams, $location, $filter, $timeout, resour
                     label: "add_pool",
                     action: function(){
                         if(this.validate()){
-                            $scope.add_pool();
-                            // NOTE: should wait for success before closing
-                            this.close();
+                            $scope.add_pool()
+                                .success(function(data, status){
+                                    $notification.create("", "Added new pool").success();
+                                    this.close();
+                                }.bind(this))
+                                .error(function(data, status){
+                                    this.createNotification("Adding pool failed", data.Detail).error();
+                                }.bind(this));
                         }
                     }
                 }
@@ -81,12 +85,12 @@ function PoolsControl($scope, $routeParams, $location, $filter, $timeout, resour
 
     // Function for adding new pools - through modal
     $scope.add_pool = function() {
-        console.log('Adding pool %s as child of pool %s', $scope.newPool.ID, $scope.params.poolID);
-        resourcesService.add_pool($scope.newPool, function(data) {
-            refreshPools($scope, resourcesService, false);
-        });
-        // Reset for another add
-        $scope.newPool = {};
+        return resourcesService.add_pool($scope.newPool)
+            .success(function(data){
+                refreshPools($scope, resourcesService, false);
+                // Reset for another add
+                $scope.newPool = {};
+            });
     };
 
     // Ensure we have a list of pools
