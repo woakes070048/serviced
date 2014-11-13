@@ -164,6 +164,11 @@ var lastMessage;
                     lastMessage.hide();
                 }
 
+                // NOTE: if $attachPoint no longer exists, attach
+                // to the default notification div
+                if(!this.$attachPoint){
+                    this.$attachPoint = $("#notifications"); 
+                }
                 this.$attachPoint.append(this.$el);
 
                 autoclose = typeof autoclose !== 'undefined' ? autoclose : true;

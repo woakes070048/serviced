@@ -142,21 +142,13 @@
            * @param {ip} string ip address to assign to service, set as null for automatic assignment
            * @param {function} callback data is passed to a callback on success.
            */
-          assign_ip: function(serviceID, ip, callback) {
+          assign_ip: function(serviceID, ip) {
             var url = '/services/' + serviceID + "/ip";
             if (ip !== null) {
               url = url + "/" + ip;
             }
-            $http.put(url).
-                success(function(data, status) {
-                    $notification.create("Assigned IP", ip).success();
-                    if (callback) {
-                      callback(data);
-                    }
-                }).
+            return $http.put(url).
                 error(function(data, status) {
-                    // TODO error screen
-                    $notification.create("Unable to assign ip", ip).error();
                     redirectIfUnauthorized(status);
                 });
           },
@@ -259,18 +251,13 @@
           /*
            * add a virtual host,
            */
-          add_vhost: function(serviceId, application, virtualhost, callback) {
+          add_vhost: function(serviceId, application, virtualhost) {
               var ep = '/services/' + serviceId + '/endpoint/' + application + '/vhosts/' + virtualhost;
               var object = {'ServiceID':serviceId, 'Application':application, 'VirtualHostName':virtualhost};
-              var payload = JSON.stringify( object);
-              $http.put(ep, payload).
-                  success(function(data, status) {
-                      $notification.create("Added virtual host", ep + data.Detail).success();
-                      callback(data);
-                  }).
-                  error(function(data, status) {
-                      // TODO error screen
-                      $notification.create("Unable to add virtual hosts", ep + data.Detail).error();
+              var payload = JSON.stringify(object);
+
+              return $http.put(ep, payload)
+                  .error(function(data, status) {
                       redirectIfUnauthorized(status);
                   });
           },
@@ -389,17 +376,12 @@
            * @param {string} ip virtual ip to add to pool
            * @param {function} callback Add result passed to callback on success.
            */
-          add_pool_virtual_ip: function(pool, ip, netmask, _interface, callback) {
+          add_pool_virtual_ip: function(pool, ip, netmask, _interface) {
               var payload = JSON.stringify( {'PoolID':pool, 'IP':ip, 'Netmask':netmask, 'BindInterface':_interface});
               if(DEBUG) console.log('Adding pool virtual ip: %s', payload);
-              $http.put('/pools/' + pool + '/virtualip', payload).
-                  success(function(data, status) {
-                      $notification.create("Added new pool virtual ip", ip).success();
-                      callback(data);
-                  }).
-                  error(function(data, status) {
-                      // TODO error screen
-                      $notification.create("Adding pool virtual ip failed", data.Detail).error();
+
+              return $http.put('/pools/' + pool + '/virtualip', payload)
+                  .error(function(data, status) {
                       redirectIfUnauthorized(status);
                   });
           },
@@ -756,20 +738,10 @@
            *
            * @param {string} serviceId The ID of the service to update.
            * @param {object} editedService The modified service.
-           * @param {function} callback Response passed to callback on success.
            */
-          update_service: function(serviceId, editedService, success, fail) {
-              fail = fail || angular.noop;
-
-              $http.put('/services/' + serviceId, editedService).
-                  success(function(data, status) {
-                      $notification.create("Updated service", serviceId).success();
-                      success(data);
-                  }).
+          update_service: function(serviceId, editedService) {
+              return $http.put('/services/' + serviceId, editedService).
                   error(function(data, status) {
-                      // TODO error screen
-                      $notification.create("Updating service failed", data.Detail).error();
-                      fail(data, status);
                       redirectIfUnauthorized(status);
                   });
           },
