@@ -164,9 +164,9 @@ var lastMessage;
                     lastMessage.hide();
                 }
 
-                // NOTE: if $attachPoint no longer exists, attach
-                // to the default notification div
-                if(!this.$attachPoint){
+                // if $attachPoint is no longer in the document
+                // use the default attachPoint
+                if(!$.contains(document, this.$attachPoint[0])){
                     this.$attachPoint = $("#notifications"); 
                 }
                 this.$attachPoint.append(this.$el);
