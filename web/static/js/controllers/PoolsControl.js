@@ -70,7 +70,7 @@ function PoolsControl($scope, $routeParams, $location, $filter, $timeout, resour
                         if(this.validate()){
                             $scope.add_pool()
                                 .success(function(data, status){
-                                    $notification.create("", "Added new pool").success();
+                                    $notification.create("Added new Pool", data.Detail).success();
                                     this.close();
                                 }.bind(this))
                                 .error(function(data, status){

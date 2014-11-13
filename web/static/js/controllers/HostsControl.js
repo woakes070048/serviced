@@ -57,9 +57,6 @@ function HostsControl($scope, $routeParams, $location, $filter, resourcesService
             $scope.newHost = {
                 poolID: $scope.params.poolID
             };
-        })
-        .error(function(data, status){
-            // TODO - handle error
         });
     };
     

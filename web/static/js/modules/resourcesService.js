@@ -471,22 +471,6 @@
                   .error(function(data, status){
                      redirectIfUnauthorized(status);
                   });
-
-                  //success(function(data, status) {
-                      //$notification.create("", data.Detail).success();
-                      //callback(data);
-                  //}).
-                  //error(function(data, status) {
-                      //// TODO error screen
-                      //$notification.create("", data.Detail).error();
-                      //if (status === 401) {
-                          //unauthorized($location);
-                      //}
-
-                      //if(errorCallback){
-                          //errorCallback(data);
-                      //}
-                  //});
           },
 
           /*
@@ -520,14 +504,6 @@
                   .error(function(data, status){
                      redirectIfUnauthorized(status);
                   });
-                  //success(function(data, status) {
-                      //$notification.create("Removed host", hostId).success();
-                      //callback(data);
-                  //}).
-                  //error(function(data, status) {
-                      //// TODO error screen
-                      //$notification.create("Removing host failed", data.Detail).error();
-                  //});
           },
 
           get_running_hosts: function(callback){
