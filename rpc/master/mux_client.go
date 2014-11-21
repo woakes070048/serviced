@@ -29,7 +29,7 @@ func (c *Client) GetMuxConnectionInfoForHost(hostID string) (map[string]proxy.TC
 		return nil, err
 	}
 
-	address := fmt.Sprintf("%s:%s", host.IPAddr, "4979") // TODO: use host.RPCPort
+	address := fmt.Sprintf("%s:%s", host.IPAddr, host.RPCPort)
 	client, err := agent.NewClient(address)
 	if err != nil {
 		return nil, err
