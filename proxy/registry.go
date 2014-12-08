@@ -141,7 +141,7 @@ func proxyFactory(protocol string, frontend ProxyAddress, backends ...ProxyAddre
 
 	}
 
-	proxy, err := proxy.NewProxy(frontendAddr, backendAddr)
+	proxy, err := NewProxy(frontendAddr, backendAddr)
 	if err != nil {
 		return nil, err
 	}
