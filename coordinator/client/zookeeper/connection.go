@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/control-center/serviced/coordinator/client"
 	zklib "github.com/samuel/go-zookeeper/zk"
 	"github.com/zenoss/glog"
-	"github.com/control-center/serviced/coordinator/client"
 )
 
 var join = lpath.Join
@@ -220,7 +220,8 @@ func (c *Connection) ChildrenW(path string) (children []string, event <-chan cli
 	}
 	children, _, zkEvent, err := c.conn.ChildrenW(join(c.basePath, path))
 	if err != nil {
-		return children, nil, err
+		//
+		return children, nil, xlateError(err)
 	}
 	return children, toClientEvent(zkEvent), xlateError(err)
 }
