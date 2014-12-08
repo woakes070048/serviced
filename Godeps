@@ -132,6 +132,10 @@
 		{
 			"ImportPath": "gopkg.in/check.v1",
 			"Rev": "871360013c92e1c715c2de6d06b54899468a8a2d"
+		},
+		{
+			"ImportPath": "golang.org/x/net/ipv4",
+			"Rev": "ccfcd82c7124abd517842acbacc3b8c1e390c73d"
 		}
 	]
 }
