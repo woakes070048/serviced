@@ -15,12 +15,17 @@ package proxy
 import (
 	"encoding/binary"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"code.google.com/p/gopacket"
+	"code.google.com/p/gopacket/layers"
+
 	"github.com/zenoss/glog"
+	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -54,7 +59,7 @@ func newConnTrackKey(addr *net.UDPAddr) *connTrackKey {
 type connTrackMap map[connTrackKey]*net.UDPConn
 
 type UDPProxy struct {
-	listener       *net.UDPConn
+	listener       net.PacketConn
 	frontendAddr   *net.UDPAddr
 	backendAddr    *net.UDPAddr
 	connTrackTable connTrackMap
@@ -62,13 +67,17 @@ type UDPProxy struct {
 }
 
 func NewUDPProxy(frontendAddr, backendAddr *net.UDPAddr) (*UDPProxy, error) {
-	listener, err := net.ListenUDP("udp", frontendAddr)
+	listener, err := net.ListenIP("ip4:udp", &net.IPAddr{IP: frontendAddr.IP})
 	if err != nil {
+		return nil, err
+	}
+	if err := bindToPort(listener, frontendAddr); err != nil {
+		listener.Close()
 		return nil, err
 	}
 	return &UDPProxy{
 		listener:       listener,
-		frontendAddr:   listener.LocalAddr().(*net.UDPAddr),
+		frontendAddr:   frontendAddr,
 		backendAddr:    backendAddr,
 		connTrackTable: make(connTrackMap),
 	}, nil
@@ -99,7 +108,7 @@ func (proxy *UDPProxy) replyLoop(proxyConn *net.UDPConn, clientAddr *net.UDPAddr
 			return
 		}
 		for i := 0; i != read; {
-			written, err := proxy.listener.WriteToUDP(readBuf[i:read], clientAddr)
+			written, err := proxyConn.WriteToUDP(readBuf[i:read], clientAddr)
 			if err != nil {
 				return
 			}
@@ -108,19 +117,56 @@ func (proxy *UDPProxy) replyLoop(proxyConn *net.UDPConn, clientAddr *net.UDPAddr
 	}
 }
 
+func ipToSockaddr(ip net.IP, port int) (syscall.Sockaddr, error) {
+	if len(ip) == 0 {
+		ip = net.IPv4zero
+	}
+	if ip = ip.To4(); ip == nil {
+		return nil, net.InvalidAddrError("non-IPv4 address")
+	}
+	sa := new(syscall.SockaddrInet4)
+	for i := 0; i < net.IPv4len; i++ {
+		sa.Addr[i] = ip[i]
+	}
+	sa.Port = port
+	return sa, nil
+}
+
+func bindToPort(c *net.IPConn, addr *net.UDPAddr) error {
+	sockaddr, err := ipToSockaddr(addr.IP, addr.Port)
+	if err != nil {
+		return err
+	}
+	ptrVal := reflect.ValueOf(c)
+	val := reflect.Indirect(ptrVal)
+	//next line will get you the net.netFD
+	fdmember := val.FieldByName("fd")
+	val1 := reflect.Indirect(fdmember)
+	netFdPtr := val1.FieldByName("sysfd")
+	fd := int(netFdPtr.Int())
+	return syscall.Bind(fd, sockaddr)
+}
+
 func (proxy *UDPProxy) Run() {
-	readBuf := make([]byte, UDPBufSize)
+	readBuf := make([]byte, 65535)
+	rawConn, _ := ipv4.NewRawConn(proxy.listener)
 	for {
-		read, from, err := proxy.listener.ReadFromUDP(readBuf)
+		hdr, payload, _, err := rawConn.ReadFrom(readBuf)
 		if err != nil {
-			// NOTE: Apparently ReadFrom doesn't return
-			// ECONNREFUSED like Read do (see comment in
-			// UDPProxy.replyLoop)
 			if !isClosedError(err) {
 				glog.Infof("Stopping proxy on udp/%v for udp/%v (%s)", proxy.frontendAddr, proxy.backendAddr, err)
 			}
 			break
 		}
+		packet := gopacket.NewPacket(readBuf, layers.LayerTypeIPv4, gopacket.Default)
+		udpLayer := packet.TransportLayer()
+		glog.Infof("Received packet layer %+v", udpLayer)
+		if udpLayer == nil {
+			glog.Infof("Received non-UDP packet")
+			continue
+		}
+		udp, _ := udpLayer.(*layers.UDP)
+		from := &net.UDPAddr{IP: hdr.Src, Port: int(udp.SrcPort)}
 
 		fromKey := newConnTrackKey(from)
 		proxy.connTrackLock.Lock()
@@ -136,13 +182,12 @@ func (proxy *UDPProxy) Run() {
 			go proxy.replyLoop(proxyConn, from, fromKey)
 		}
 		proxy.connTrackLock.Unlock()
-		for i := 0; i != read; {
-			written, err := proxyConn.Write(readBuf[i:read])
-			if err != nil {
-				glog.Infof("Can't proxy a datagram to udp/%s: %s\n", proxy.backendAddr, err)
-				break
-			}
-			i += written
+
+		// Reroute to the correct IP
+		hdr.Dst = proxy.backendAddr.IP
+		if err := rawConn.WriteTo(hdr, payload, nil); err != nil {
+			//if err := rawConn.WriteTo(hdr, payload, nil); err != nil {
+			glog.Infof("Can't proxy a datagram to udp/%s: %s\n", proxy.backendAddr, err)
 		}
 	}
 }

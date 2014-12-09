@@ -136,6 +136,14 @@
 		{
 			"ImportPath": "golang.org/x/net/ipv4",
 			"Rev": "ccfcd82c7124abd517842acbacc3b8c1e390c73d"
+		},
+		{
+			"ImportPath": "code.google.com/p/gopacket",
+			"Rev": "35960c88f08138235636f33b18236050c9bdbffe"
+		},
+		{
+			"ImportPath": "code.google.com/p/gopacket/layers",
+			"Rev": "35960c88f08138235636f33b18236050c9bdbffe"
 		}
 	]
 }
