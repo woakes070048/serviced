@@ -37,6 +37,9 @@ func NewProxy(frontendAddr, backendAddr net.Addr) (dockerproxy.Proxy, error) {
 	return NewTransparentProxy(frontendAddr, backendAddr)
 }
 
+func ListenRawUDP(laddr *net.UDPAddr) (*IPConn, error) {
+}
+
 func ipToSockaddr(ip net.IP, port int) (syscall.Sockaddr, error) {
 	if len(ip) == 0 {
 		ip = net.IPv4zero
@@ -52,20 +55,20 @@ func ipToSockaddr(ip net.IP, port int) (syscall.Sockaddr, error) {
 	return sa, nil
 }
 
-func bindToPort(c *net.IPConn, ip net.IP, port int) error {
-	sockaddr, err := ipToSockaddr(ip, port)
-	if err != nil {
-		return err
-	}
-	ptrVal := reflect.ValueOf(c)
-	val := reflect.Indirect(ptrVal)
-	//next line will get you the net.netFD
-	fdmember := val.FieldByName("fd")
-	val1 := reflect.Indirect(fdmember)
-	netFdPtr := val1.FieldByName("sysfd")
-	fd := int(netFdPtr.Int())
-	return syscall.Bind(fd, sockaddr)
-}
+//func bindToPort(c *net.IPConn, ip net.IP, port int) error {
+//	sockaddr, err := ipToSockaddr(ip, port)
+//	if err != nil {
+//		return err
+//	}
+//	ptrVal := reflect.ValueOf(c)
+//	val := reflect.Indirect(ptrVal)
+//	//next line will get you the net.netFD
+//	fdmember := val.FieldByName("fd")
+//	val1 := reflect.Indirect(fdmember)
+//	netFdPtr := val1.FieldByName("sysfd")
+//	fd := int(netFdPtr.Int())
+//	return syscall.Bind(fd, sockaddr)
+//}
 
 func getAddrInfo(addr net.Addr) (ip net.IP, port int, err error) {
 	switch addr.(type) {
@@ -126,11 +129,11 @@ func RawListener(addr net.Addr) (*net.IPConn, error) {
 
 func NewTransparentProxy(frontendAddr, backendAddr net.Addr) (dockerproxy.Proxy, error) {
 	var (
-	//frontendIP net.IP
-	//frontendPort int
+		frontendIP net.IP
+		//frontendPort int
 	)
 	// This will fail with an err if we don't support the protocol of the frontend address
-	//frontendIP, _, err := getAddrInfo(frontendAddr)
+	frontendIP, _, err := getAddrInfo(frontendAddr)
 	// Verify that both addresses use the same protocol
 	switch frontendAddr.(type) {
 	case *net.UDPAddr:
@@ -143,9 +146,9 @@ func NewTransparentProxy(frontendAddr, backendAddr net.Addr) (dockerproxy.Proxy,
 		}
 	}
 	// Open a raw socket for incoming traffic
-	//network := frontendAddr.Network() // This will be "tcp" or "udp" at this point
-	//listener, err := net.ListenIP("ip4:"+network, &net.IPAddr{IP: frontendIP})
-	listener, err := RawListener(frontendAddr)
+	network := frontendAddr.Network() // This will be "tcp" or "udp" at this point
+	listener, err := net.ListenIP("ip4:"+network, &net.IPAddr{IP: frontendIP})
+	//listener, err := RawListener(frontendAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +180,6 @@ func (proxy *TransparentProxy) dialBackend() error {
 	glog.Errorf("LOCAL ADDRESS: %+v", reflect.TypeOf(proxy.localAddr))
 	localIP, _, err := getAddrInfo(proxy.localAddr)
 	if err != nil {
-		glog.Errorf("Shit is so bad -1: %+v", err)
 		return err
 	}
 	network := proxy.backendAddr.Network()
@@ -185,12 +187,10 @@ func (proxy *TransparentProxy) dialBackend() error {
 		&net.IPAddr{IP: localIP},
 		&net.IPAddr{IP: backendIP})
 	if err != nil {
-		glog.Errorf("Shit is so bad: %+v", err)
 		return err
 	}
 	rawBackendConn, err := ipv4.NewRawConn(backendConn)
 	if err != nil {
-		glog.Errorf("Shit is so bad 2: %+v", err)
 		return err
 	}
 	proxy.backend = rawBackendConn
@@ -262,7 +262,6 @@ func readPackets(conn *ipv4.RawConn, buffer []byte) (chan packet, error) {
 					transport.LayerType())
 				continue
 			}
-			glog.Infof("Received packet destined for %v:%v", p.Dst.IP, p.Dst.Port)
 			packetChan <- p
 		}
 	}()
@@ -282,6 +281,7 @@ func (proxy *TransparentProxy) HandleIncoming(exit chan bool) {
 	// Rewrite destination to go to the backend
 	ip, _, _ := getAddrInfo(proxy.backendAddr)
 	for packet := range packetChan {
+		glog.Infof("Received packet destined for %v:%v", packet.Dst.IP, packet.Dst.Port)
 		// Write it down the pipe
 		packet.Header.Dst = ip
 		//if packet.Dst.Port != port {
