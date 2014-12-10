@@ -13,7 +13,11 @@
 
 package addressassignment
 
-import "github.com/control-center/serviced/datastore"
+import (
+	"fmt"
+
+	"github.com/control-center/serviced/datastore"
+)
 
 //AddressAssignment is used to track Ports that have been assigned to a Service.
 type AddressAssignment struct {
@@ -42,4 +46,8 @@ func (assign AddressAssignment) EqualIP(b AddressAssignment) bool {
 		return false
 	}
 	return true
+}
+
+func (assign AddressAssignment) Addr() string {
+	return fmt.Sprintf("%s:%d", assign.IPAddr, assign.Port)
 }

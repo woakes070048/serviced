@@ -215,7 +215,7 @@ func (a *HostAgent) AttachService(done chan<- interface{}, svc *service.Service,
 		a.removeInstance(state.ID, ctr)
 	})
 
-	go a.setProxy(svc, ctr)
+	//go a.setProxy(svc, ctr)
 	return nil
 }
 
@@ -422,7 +422,7 @@ func (a *HostAgent) StartService(done chan<- interface{}, svc *service.Service, 
 		return err
 	}
 
-	go a.setProxy(svc, ctr)
+	//go a.setProxy(svc, ctr)
 	return nil
 }
 
@@ -431,6 +431,7 @@ func (a *HostAgent) setProxy(svc *service.Service, ctr *docker.Container) {
 	for _, endpoint := range svc.Endpoints {
 		if addressConfig := endpoint.GetAssignment(); addressConfig != nil {
 			glog.V(4).Infof("Found address assignment for %s: %s endpoint %s", svc.Name, svc.ID, endpoint.Name)
+
 			proxyID := fmt.Sprintf("%v:%v", svc.ID, endpoint.Name)
 			frontEnd := proxy.ProxyAddress{IP: addressConfig.IPAddr, Port: addressConfig.Port}
 			backEnd := proxy.ProxyAddress{IP: ctr.NetworkSettings.IPAddress, Port: endpoint.PortNumber}
@@ -518,6 +519,12 @@ func configureContainer(a *HostAgent, client *ControlClient,
 	if svc.Endpoints != nil {
 		glog.V(1).Info("Endpoints for service: ", svc.Endpoints)
 		for _, endpoint := range svc.Endpoints {
+			if addressConfig := endpoint.GetAssignment(); addressConfig != nil {
+				glog.V(4).Infof("Found address assignment for %s: %s endpoint %s",
+					svc.Name, svc.ID, endpoint.Name)
+				hcfg.NetworkMode = "host"
+				cfg.Env = append(cfg.Env, "SERVICED_ENDPOINT=127.0.0.1:4979")
+			}
 			if endpoint.Purpose == "export" { // only expose remote endpoints
 				var port uint16
 				port = endpoint.PortNumber

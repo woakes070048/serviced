@@ -45,8 +45,8 @@ type reconnectingClient struct {
 // connectAndSet will create an underlying rpc client, set it and return it if current rpc client is nil
 func (rc *reconnectingClient) connectAndSet() (*rpc.Client, error) {
 	if rc.remoteClient == nil {
-		glog.V(4).Infof("Connecting to %s", rc.addr)
-		conn, err := net.DialTimeout("tcp", rc.addr, time.Duration(dialTimeoutSecs) * time.Second)
+		glog.V(0).Infof("Connecting to %s", rc.addr)
+		conn, err := net.DialTimeout("tcp", rc.addr, time.Duration(dialTimeoutSecs)*time.Second)
 		if err != nil {
 			return nil, err
 		}
