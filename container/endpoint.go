@@ -590,8 +590,15 @@ func (c *Controller) setProxyAddresses(tenantEndpointID string, endpoints []dao.
 func createNewProxy(tenantEndpointID string, endpoint dao.ApplicationEndpoint, allowDirect bool) (*proxy, error) {
 	glog.Infof("Attempting port map for: %s -> %+v", tenantEndpointID, endpoint)
 
+	tcpAddr, err := net.ResolveTCPAddr("tcp4", fmt.Sprintf(":%d", endpoint.ProxyPort))
+	
+	if err !=  nil {
+		glog.Errorf("Could not resolve port %d: %s", endpoint.ProxyPort, err)
+		return nil, err
+	}
+
 	// setup a new proxy
-	listener, err := net.ListenTCP("tcp4", fmt.Sprintf(":%d", endpoint.ProxyPort))
+	listener, err := net.ListenTCP("tcp4",tcpAddr)
 	if err != nil {
 		glog.Errorf("Could not bind to port %d: %s", endpoint.ProxyPort, err)
 		return nil, err

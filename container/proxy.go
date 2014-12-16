@@ -14,13 +14,15 @@
 package container
 
 import (
-	"crypto/tls"
+//	"crypto/tls"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zenoss/glog"
@@ -149,9 +151,9 @@ func (p *proxy) Close() error {
 func (p *proxy) listenAndproxy() {
 
 	connections := make(chan *net.TCPConn)
-	go func(lsocket net.Listener, conns chan net.Conn) {
+	go func(lsocket *net.TCPListener, conns chan *net.TCPConn) {
 		for {
-			conn, err := lsocket.Accept()
+			conn, err := lsocket.AcceptTCP()
 			if err != nil {
 				glog.Fatal("Error (net.Accept): ", err)
 			}
@@ -236,20 +238,24 @@ func (p *proxy) prxy(local *net.TCPConn, address addressTuple) {
 	switch {
 	case isLocalContainer:
 		glog.V(2).Infof("dialing local addr=> %s", localAddr)
-		remote, err = net.DialTCP("tcp4", nil, localAddr)
+		if addr, err  := net.ResolveTCPAddr("tcp4", localAddr); err == nil {
+			remote, err = net.DialTCP("tcp4", nil, addr)
+		}
 	case p.useTLS:
 		glog.V(2).Infof("dialing remote tls => %s", muxAddr)
-		config := tls.Config{InsecureSkipVerify: true}
-		remoteTLS, err = tls.Dial("tcp4", muxAddr, &config)
+		/*config := tls.Config{InsecureSkipVerify: true}
+		remoteTLS, err := tls.Dial("tcp4", muxAddr, &config)
 		switch t := remoteTLS.(type) {
 		default:
 			glog.Fatal("REMOTE TLS IS NOT tcp conn")
 		case *net.TCPConn:
 			remote := t
-		}
+		}*/
 	default:
 		glog.V(2).Infof("dialing remote => %s", muxAddr)
-		remote, err = net.DialTCP("tcp4", nil, muxAddr)
+		if addr, err := net.ResolveTCPAddr("tcp4", muxAddr); err == nil {
+			remote, err = net.DialTCP("tcp4", nil, addr)
+		}
 	}
 	if err != nil {
 		glog.Error("Error (net.Dial): ", err)
@@ -271,7 +277,7 @@ func (p *proxy) prxy(local *net.TCPConn, address addressTuple) {
 	//broker code from docker proxy.go
 	var broker = func(to, from *net.TCPConn) {
 		defer wg.Done()
-		written, err := io.Copy(to, from)
+		_, err := io.Copy(to, from)
 		if err != nil {
 			// If the socket we are writing to is shutdown with
 			// SHUT_WR, forward it to the other end of the pipe:
