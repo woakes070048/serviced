@@ -82,12 +82,12 @@ type proxy struct {
 	useTLS           bool                // use encryption over mux port
 	closing          chan chan error     // internal shutdown signal
 	newAddresses     chan []addressTuple // a stream of updates to the addresses
-	listener         net.Listener        // handle on the listening socket
+	listener         *net.TCPListener    // handle on the listening socket
 	allowDirectConn  bool                // allow container to container connections
 }
 
 // Newproxy create a new proxy object. It starts listening on the prxy port asynchronously.
-func newProxy(name, tenantEndpointID string, tcpMuxPort uint16, useTLS bool, listener net.Listener, allowDirectConn bool) (p *proxy, err error) {
+func newProxy(name, tenantEndpointID string, tcpMuxPort uint16, useTLS bool, listener *net.TCPListener, allowDirectConn bool) (p *proxy, err error) {
 	if len(name) == 0 {
 		return nil, fmt.Errorf("prxy: name can not be empty")
 	}
@@ -148,7 +148,7 @@ func (p *proxy) Close() error {
 // incoming connection a goroutine running the prxy method is created.
 func (p *proxy) listenAndproxy() {
 
-	connections := make(chan net.Conn)
+	connections := make(chan *net.TCPConn)
 	go func(lsocket net.Listener, conns chan net.Conn) {
 		for {
 			conn, err := lsocket.Accept()
@@ -193,10 +193,10 @@ func getPort(addr string) (int, error) {
 // prxy takes an established local connection, Dials the remote address specified
 // by the proxy structure and then copies data to and from the resulting pair
 // of endpoints.
-func (p *proxy) prxy(local net.Conn, address addressTuple) {
+func (p *proxy) prxy(local *net.TCPConn, address addressTuple) {
 
 	var (
-		remote net.Conn
+		remote *net.TCPConn
 		err    error
 	)
 	glog.V(2).Infof("Setting up proxy for %#v", address)
@@ -236,14 +236,20 @@ func (p *proxy) prxy(local net.Conn, address addressTuple) {
 	switch {
 	case isLocalContainer:
 		glog.V(2).Infof("dialing local addr=> %s", localAddr)
-		remote, err = net.Dial("tcp4", localAddr)
+		remote, err = net.DialTCP("tcp4", nil, localAddr)
 	case p.useTLS:
 		glog.V(2).Infof("dialing remote tls => %s", muxAddr)
 		config := tls.Config{InsecureSkipVerify: true}
-		remote, err = tls.Dial("tcp4", muxAddr, &config)
+		remoteTLS, err = tls.Dial("tcp4", muxAddr, &config)
+		switch t := remoteTLS.(type) {
+		default:
+			glog.Fatal("REMOTE TLS IS NOT tcp conn")
+		case *net.TCPConn:
+			remote := t
+		}
 	default:
 		glog.V(2).Infof("dialing remote => %s", muxAddr)
-		remote, err = net.Dial("tcp4", muxAddr)
+		remote, err = net.DialTCP("tcp4", nil, muxAddr)
 	}
 	if err != nil {
 		glog.Error("Error (net.Dial): ", err)
@@ -259,18 +265,57 @@ func (p *proxy) prxy(local net.Conn, address addressTuple) {
 
 	glog.V(2).Infof("Using hostAgent:%v to prxy %v<->%v<->%v<->%v",
 		remote.RemoteAddr(), local.LocalAddr(), local.RemoteAddr(), remote.LocalAddr(), address)
-	go func(address string) {
-		defer local.Close()
-		defer remote.Close()
-		io.Copy(local, remote)
-		glog.V(2).Infof("Closing hostAgent:%v to prxy %v<->%v<->%v<->%v",
-			remote.RemoteAddr(), local.LocalAddr(), local.RemoteAddr(), remote.LocalAddr(), address)
-	}(address.containerAddr)
-	go func(address string) {
-		defer local.Close()
-		defer remote.Close()
-		io.Copy(remote, local)
-		glog.V(2).Infof("closing hostAgent:%v to prxy %v<->%v<->%v<->%v",
-			remote.RemoteAddr(), local.LocalAddr(), local.RemoteAddr(), remote.LocalAddr(), address)
-	}(address.containerAddr)
+
+	var wg sync.WaitGroup
+
+	//broker code from docker proxy.go
+	var broker = func(to, from *net.TCPConn) {
+		defer wg.Done()
+		written, err := io.Copy(to, from)
+		if err != nil {
+			// If the socket we are writing to is shutdown with
+			// SHUT_WR, forward it to the other end of the pipe:
+			if err, ok := err.(*net.OpError); ok && err.Err == syscall.EPIPE {
+				from.CloseWrite()
+			}
+		}
+		to.CloseRead()
+	}
+
+	wg.Add(1)
+	go broker(local, remote)
+	wg.Add(1)
+
+	go broker(remote, local)
+	wg.Wait()
+	local.Close()
+	remote.Close()
+	//	go func(address string) {
+	//		defer local.Close()
+	//		defer remote.Close()
+	//		_, err := io.Copy(local, remote)
+	//		if err != nil {
+	//					// If the socket we are writing to is shutdown with
+	//					// SHUT_WR, forward it to the other end of the pipe:
+	//					if err, ok := err.(*net.OpError); ok && err.Err == syscall.EPIPE {
+	//						if tcpConn, ok  := remote.(*net.TCPConn); ok{
+	//							tcpConn.CloseWrite()
+	//						}
+	//					}
+	//				}
+	//
+	//		if tcpConn, ok  := local.(*net.TCPConn); ok{
+	//			tcpConn.CloseRead()
+	//		}
+	//
+	//		glog.V(2).Infof("Closing hostAgent:%v to prxy %v<->%v<->%v<->%v",
+	//			remote.RemoteAddr(), local.LocalAddr(), local.RemoteAddr(), remote.LocalAddr(), address)
+	//	}(address.containerAddr)
+	//	go func(address string) {
+	//		defer local.Close()
+	//		defer remote.Close()
+	//		io.Copy(remote, local)
+	//		glog.V(2).Infof("closing hostAgent:%v to prxy %v<->%v<->%v<->%v",
+	//			remote.RemoteAddr(), local.LocalAddr(), local.RemoteAddr(), remote.LocalAddr(), address)
+	//	}(address.containerAddr)
 }

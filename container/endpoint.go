@@ -591,7 +591,7 @@ func createNewProxy(tenantEndpointID string, endpoint dao.ApplicationEndpoint, a
 	glog.Infof("Attempting port map for: %s -> %+v", tenantEndpointID, endpoint)
 
 	// setup a new proxy
-	listener, err := net.Listen("tcp4", fmt.Sprintf(":%d", endpoint.ProxyPort))
+	listener, err := net.ListenTCP("tcp4", fmt.Sprintf(":%d", endpoint.ProxyPort))
 	if err != nil {
 		glog.Errorf("Could not bind to port %d: %s", endpoint.ProxyPort, err)
 		return nil, err
