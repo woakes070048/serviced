@@ -17,9 +17,6 @@ function Service(service, parent){
 
     // these properties are for convenience
     this.name = service.Name;
-
-    // these properties are for convenience
-    this.name = service.Name;
     this.id = service.ID;
 
     // this newly created child should be
@@ -41,11 +38,22 @@ Service.prototype = {
         if(service){
             // make service immutable
             this.service = Object.freeze(service);
+            
+            // these properties are for convenience
+            this.name = service.Name;
+            this.id = service.ID;
         }
 
         // TODO - update service health
-        // TODO - infer service type: isvcs,
-        // container(children but no startup), regular
+
+        // infer service type
+        // TODO - check for more types
+        // TODO - set a type property 
+        if(this.service.ID.indexOf("isvc-") != -1){
+            this.isvc = true;
+        }
+
+        // invalid caches
         this.cache.markAllDirty();
 
         console.log("Updating service", this.service.Name);
@@ -79,6 +87,16 @@ Service.prototype = {
     // service and all children, and
     // caches the list
     aggregateVHosts: function(){
+        var hosts = this.cache.getIfClean("hosts");
+
+        // if valid cache, early return it
+        if(hosts){
+            console.log("Using cached vhosts for ", this.name);
+            return hosts;
+        }
+
+        console.log("Calculating vhosts for ", this.name);
+        // otherwise, get some data
         var services = this.aggregateDescendents(),
             top = this.service;
 
@@ -87,7 +105,7 @@ Service.prototype = {
         services.push(this);
 
         // iterate services
-        return services.reduce(function(acc, child){
+        hosts = services.reduce(function(acc, child){
 
             var result = [];
 
@@ -112,12 +130,26 @@ Service.prototype = {
 
             return acc.concat(result);
         }, []);
+
+        this.cache.cache("vhosts", hosts);
+        return hosts;
     },
 
     // returns a list of address assignments
     // for service and all children, and
     // caches the list
     aggregateAddressAssignments: function(){
+
+        var addresses = this.cache.getIfClean("addresses");
+
+        // if valid cache, early return it
+        if(addresses){
+            console.log("Using cached addresses for ", this.name);
+            return addresses;
+        }
+
+        console.log("Calculating addresses for ", this.name);
+        // otherwise, get some new data
         var services = this.aggregateDescendents(),
             top = this.service;
 
@@ -126,7 +158,7 @@ Service.prototype = {
         services.push(this);
 
         // iterate services
-        return services.reduce(function(acc, service){
+        addresses = services.reduce(function(acc, service){
 
             var result = [];
 
@@ -154,6 +186,10 @@ Service.prototype = {
 
             return acc.concat(result);
         }, []);
+
+        this.cache.cache("addresses", addresses);
+        return addresses;
+
     },
 
     // returns a flat map of all descendents
@@ -300,7 +336,15 @@ var serviceService = {
     // NOTE - these are debug only! remove!
     serviceTree: serviceTree,
     serviceMap: serviceMap,
-    init: init
+    init: init,
+    // get by name
+    get: function(name){
+        for(var id in serviceMap){
+            if(serviceMap[id].name === name){
+                return serviceMap[id]; 
+            } 
+        } 
+    }
 };
 
 // NOTE - this is debug only. remove!
@@ -347,10 +391,6 @@ function init(){
 
             // store services as a flat map
             data.forEach(function(service){
-                // flag internal services
-                // TODO - move this to Service object
-                service.isvc = service.ID.indexOf("isvc-") != -1;
-
                 serviceMap[service.ID] = new Service(service);
             });
 
