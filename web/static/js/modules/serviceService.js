@@ -10,6 +10,9 @@ function Service(service, parent){
     this.parent = parent;
     this.children = [];
 
+    // tree depth
+    this.depth = 0;
+
     // cache for computed values
     this.cache = new Cache(["vhosts", "addresses", "descendents", "instances"]);
 
@@ -33,16 +36,12 @@ Service.prototype = {
     // updates the immutable service object
     // and marks any computed properties dirty
     update: function(service){
-        // if a new service is provided,
-        // replace the existing service
-        if(service){
-            // make service immutable
-            this.service = Object.freeze(service);
-            
-            // these properties are for convenience
-            this.name = service.Name;
-            this.id = service.ID;
-        }
+        // make service immutable
+        this.service = Object.freeze(service);
+        
+        // these properties are for convenience
+        this.name = service.Name;
+        this.id = service.ID;
 
         // TODO - update service health
 
@@ -53,26 +52,32 @@ Service.prototype = {
             this.isvc = true;
         }
 
-        // invalid caches
-        this.cache.markAllDirty();
+        // invalidate caches
+        this.markDirty();
 
         console.log("Updating service", this.service.Name);
+    },
 
-        // notify parent of update
-        if(this.parent){
-            this.parent.update();
-        }
+    // invalidate all caches. This is needed 
+    // when descendents update
+    markDirty: function(){
+        this.cache.markAllDirty();
+        console.log("Invalidating all caches", this.service.Name);
     },
 
     addChild: function(service){
         // TODO - check for duplicates?
         this.children.push(service);
-        this.update();
+
+        this.markDirty();
+
+        // alpha sort children
+        this.children.sort(sortServicesByName);
     },
 
     removeChild: function(service){
         // TODO - remove child
-        this.update();
+        this.markDirty();
     },
 
     addParent: function(service){
@@ -80,14 +85,14 @@ Service.prototype = {
             this.parent.removeChild(this);
         }
         this.parent = service;
-        this.update();
+        this.markDirty();
     },
 
     // returns a list of VHosts for
     // service and all children, and
     // caches the list
     aggregateVHosts: function(){
-        var hosts = this.cache.getIfClean("hosts");
+        var hosts = this.cache.getIfClean("vhosts");
 
         // if valid cache, early return it
         if(hosts){
@@ -97,29 +102,28 @@ Service.prototype = {
 
         console.log("Calculating vhosts for ", this.name);
         // otherwise, get some data
-        var services = this.aggregateDescendents(),
-            top = this.service;
+        var services = this.aggregateDescendents().slice();
 
         // we also want to see the Endpoints for this
         // service, so add it to the list
         services.push(this);
 
         // iterate services
-        hosts = services.reduce(function(acc, child){
+        hosts = services.reduce(function(acc, service){
 
             var result = [];
 
             // if Endpoints, iterate Endpoints
-            if(child.service.Endpoints){
-                result = child.service.Endpoints.reduce(function(acc, endpoint){
+            if(service.service.Endpoints){
+                result = service.service.Endpoints.reduce(function(acc, endpoint){
                     // if VHosts, iterate VHosts
                     if(endpoint.VHosts){
                         endpoint.VHosts.forEach(function(VHost){
                             acc.push({
                                 Name: VHost,
-                                Application: top.Name,
+                                Application: service.name,
                                 ServiceEndpoint: endpoint.Application,
-                                ApplicationId: top.ID
+                                ApplicationId: service.id
                             });
                         });
                     }
@@ -150,8 +154,7 @@ Service.prototype = {
 
         console.log("Calculating addresses for ", this.name);
         // otherwise, get some new data
-        var services = this.aggregateDescendents(),
-            top = this.service;
+        var services = this.aggregateDescendents().slice();
 
         // we also want to see the Endpoints for this
         // service, so add it to the list
@@ -176,8 +179,8 @@ Service.prototype = {
                             PoolID: endpoint.AddressAssignment.PoolID,
                             IPAddr: endpoint.AddressAssignment.IPAddr,
                             Port: endpoint.AddressConfig.Port,
-                            ServiceID: top.ID,
-                            ServiceName: top.Name
+                            ServiceID: service.id,
+                            ServiceName: service.name
                         });
                     }
                     return acc;
@@ -358,7 +361,7 @@ window.s = serviceService;
 function update(){
     // TODO - ensure init has been called
     // TODO - use resourcesService to make requests
-    $.get("/services?since=4000")
+    $.get("/services?since=4000&testy='testy'")
         .success(function(data, status){
             // TODO - change backend to send
             // updated, created, and deleted
@@ -384,7 +387,7 @@ function update(){
 function init(){
 
     // TODO - use resourcesService to make requests
-    $.get('/services')
+    var p = $.get('/services')
         .success(function(data, status) {
 
             var service, parent;
@@ -403,6 +406,8 @@ function init(){
       });
 
       setInterval(update, 3000);
+
+      return p;
 }
 
 // adds a service object to the service tree
@@ -421,7 +426,24 @@ function addServiceToTree(service){
     // if this is a top level service
     } else {
         serviceTree.push(service);
+        serviceTree.sort(sortServicesByName);
     }
+
+    // ICKY GROSS HACK!
+    // iterate tree and store tree depth on
+    // individual services
+    // TODO - find a more elegant way to keep track of depth
+    serviceTree.forEach(function(topService){
+        topService.depth = 0;
+        topService.children.forEach(function recurse(service){
+            service.depth = service.parent.depth + 1;
+            service.children.forEach(recurse);
+        });
+    });
+}
+
+function sortServicesByName(a, b){
+    return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
 }
 
 })();

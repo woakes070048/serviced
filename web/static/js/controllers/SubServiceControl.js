@@ -333,7 +333,7 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
 	    mode: "properties"
 	}
 	
-        $scope.editableContext = makeEditableContext($scope.services.current.Context);
+        $scope.editableContext = makeEditableContext($scope.services.current.service.Context);
 
         $modalService.create({
             templateUrl: "edit-context.html",
@@ -396,7 +396,7 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
             }
         }
 
-        $scope.services.current.Context = context;
+        $scope.services.current.service.Context = context;
         return $scope.updateService();
     }
 
@@ -513,7 +513,7 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
 
     $scope.validateService = function() {
       // TODO: Validate name and startup command
-      var svc = $scope.services.current,
+      var svc = $scope.services.current.service,
           max = svc.InstanceLimits.Max,
           min = svc.InstanceLimits.Min,
           num = svc.Instances;
@@ -536,9 +536,9 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
 
     $scope.updateService = function() {
         if ($scope.validateService()) {
-            var serviceId = $scope.services.current.ID;
+            var serviceId = $scope.services.current.service.ID;
 
-            return resourcesService.update_service($scope.services.current.ID, $scope.services.current)
+            return resourcesService.update_service($scope.services.current.service.ID, $scope.services.current.service)
                 .success(function(data, status){
                     $notification.create("Updated service", serviceId).success();
                     refreshServices($scope, resourcesService, false);
@@ -548,6 +548,8 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
                 });
         }
     };
+
+    window.u = $scope.updateService;
 
     // Update the running instances so it is reflected when we save the changes
     function updateRunning() {
@@ -559,25 +561,47 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         }
     }
 
-    // Get a list of deployed apps
-    refreshServices($scope, resourcesService, true, function() {
-        if ($scope.services.current) {
-            var lineage = getServiceLineage($scope.services.mapped, $scope.services.current);
-            for (var i=0; i < lineage.length; i++) {
-                var crumb = {
-                    label: lineage[i].Name
-                };
-                if (i == lineage.length - 1) {
-                    crumb.itemClass = 'active';
-                } else {
-                    crumb.url = '#/services/' + lineage[i].ID;
-                }
-                $scope.breadcrumbs.push(crumb);
-            }
-        }
+    // HACK - testing servicves refactor
+    s.init().then(function(){
+    
+        // $apply forces $digest update
+        $scope.$apply(function(){
+        
+            // HACK - this is to get junk working!
+            $scope.services = {
+                data: s.serviceTree,
+                mapped: s.serviceMap,
+                current: s.getService($scope.params.serviceId),
 
-        loadSubServiceHosts();
-        $serviceHealth.update();
+            };
+            if($scope.services.current){
+                $scope.services.subservices = s.getService($scope.params.serviceId).aggregateDescendents();
+                $scope.vhosts.data = s.getService($scope.params.serviceId).aggregateVHosts();
+                $scope.ips.data = s.getService($scope.params.serviceId).aggregateAddressAssignments();
+            }
+        });
+
+        /*  
+        // Get a list of deployed apps
+        refreshServices($scope, resourcesService, true, function() {
+            if ($scope.services.current.service) {
+                var lineage = getServiceLineage($scope.services.mapped, $scope.services.current.service);
+                for (var i=0; i < lineage.length; i++) {
+                    var crumb = {
+                        label: lineage[i].Name
+                    };
+                    if (i == lineage.length - 1) {
+                        crumb.itemClass = 'active';
+                    } else {
+                        crumb.url = '#/services/' + lineage[i].ID;
+                    }
+                    $scope.breadcrumbs.push(crumb);
+                }
+            }
+
+            loadSubServiceHosts();
+            $serviceHealth.update();
+        });*/
     });
 
     var wait = { hosts: false, running: false };
@@ -661,7 +685,7 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
             });
         };
         $scope.deleteService = function() {
-            var parent = $scope.services.current.ParentServiceID;
+            var parent = $scope.services.current.service.ParentServiceID;
             console.log('Parent: %s, Length: %d', parent, parent.length);
             resourcesService.remove_service($scope.params.serviceId, function() {
                 refreshServices($scope, resourcesService, false, function() {
@@ -738,7 +762,7 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
     $scope.editCurrentService = function(){
 
         // clone service for editing
-        $scope.editableService = $.extend({}, $scope.services.current);
+        $scope.editableService = $.extend({}, $scope.services.current.service);
         
         $modalService.create({
             templateUrl: "edit-service.html",
