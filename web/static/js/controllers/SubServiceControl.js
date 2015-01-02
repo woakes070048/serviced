@@ -1,9 +1,9 @@
-function SubServiceControl($scope, $q, $routeParams, $location, resourcesService, authService, $serviceHealth, $modalService, $translate, $notification, $timeout){
+function SubServiceControl($scope, $q, $routeParams, $location, resourcesService, authService, $serviceHealth, $modalService, $translate, $notification, $timeout, $servicesService){
     // Ensure logged in
     authService.checkLogin($scope);
     $scope.name = "servicedetails";
     $scope.params = $routeParams;
-    $scope.servicesService = resourcesService;
+    $scope.resourcesService = resourcesService;
 
     $scope.defaultHostAlias = location.hostname;
     var re = /\b(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/;
@@ -248,8 +248,8 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         return {'padding-left': (20*depth) + "px"};
     };
 
-    $scope.clickRunning = function(app, status, servicesService){
-        toggleRunning(app, status, servicesService);
+    $scope.clickRunning = function(app, status, resourcesService){
+        toggleRunning(app, status, resourcesService);
         $serviceHealth.update(app.ID);
     };
 
@@ -257,7 +257,7 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         return str.slice(0,1).toUpperCase() + str.slice(1);
     }
 
-    $scope.clickRunningApp = function(app, status, servicesService) {
+    $scope.clickRunningApp = function(app, status, resourcesService) {
 
         // if this service has children and startup command, ask the user
         // if we should start service + children, or just service
@@ -304,14 +304,14 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
                         action: function(){
                             // the 4th arg here explicitly prevents child services
                             // from being started
-                            toggleRunning(app, status, servicesService, true);
+                            toggleRunning(app, status, resourcesService, true);
                             this.close();
                         }
                     },{
                         role: "ok",
                         label: $translate.instant(status +"_service_and_children", {count: childCount}),
                         action: function(){
-                            toggleRunning(app, status, servicesService);
+                            toggleRunning(app, status, resourcesService);
                             this.close();
                         }
                     }
@@ -321,12 +321,12 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         // this service has no children or no startup command,
         // so start it the usual way
         } else {
-            $scope.clickRunning(app, status, servicesService);
+            $scope.clickRunning(app, status, resourcesService);
         }
 
     };
 
-    $scope.clickEditContext = function(app, servicesService) {
+    $scope.clickEditContext = function(app, resourcesService) {
 	//set editor options for context editing
 	$scope.codemirrorOpts = {
 	    lineNumbers: true,
@@ -349,7 +349,7 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
                         // disable ok button, and store the re-enable function
                         var enableSubmit = this.disableSubmitButton();
 
-                        saveContext(app, servicesService)
+                        saveContext(app, resourcesService)
                             .success(function(data, status){
                                 this.close(); 
                             }.bind(this))
@@ -561,29 +561,45 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         }
     }
 
-    // HACK - testing servicves refactor
-    s.init().then(function(){
-    
-        // $apply forces $digest update
-        $scope.$apply(function(){
-        
-            // HACK - this is to get junk working!
-            $scope.services = {
-                data: s.serviceTree,
-                mapped: s.serviceMap,
-                current: s.getService($scope.params.serviceId),
+    // only map services object when the servicesService
+    // is done loading up
+    $servicesService.init().then(function(){
+        // HACK - this is to get junk working!
+        $scope.services = {
+            data: $servicesService.serviceTree,
+            mapped: $servicesService.serviceMap,
+            current: $servicesService.getService($scope.params.serviceId),
 
-            };
-            if($scope.services.current){
-                $scope.services.subservices = s.getService($scope.params.serviceId).aggregateDescendents();
-                $scope.vhosts.data = s.getService($scope.params.serviceId).aggregateVHosts();
-                $scope.ips.data = s.getService($scope.params.serviceId).aggregateAddressAssignments();
+        };
+        if($scope.services.current){
+            $scope.services.subservices = $servicesService.getService($scope.params.serviceId).aggregateDescendents();
+            $scope.vhosts.data = $servicesService.getService($scope.params.serviceId).aggregateVHosts();
+            $scope.ips.data = $servicesService.getService($scope.params.serviceId).aggregateAddressAssignments();
+        }
+
+        // setup breadcrumbs
+        var crumbs = [{
+            label: $scope.services.current.name,
+            itemClass: "active"
+        }];
+
+        (function recurse(service){
+            if(service){
+                crumbs.unshift({
+                    label: service.name,
+                    url: "#/services/"+ service.id
+                });
+                recurse(service.parent);
             }
-        });
+        })($scope.services.current.parent);
 
-        /*  
+        $scope.breadcrumbs = crumbs;
+    });
+
         // Get a list of deployed apps
-        refreshServices($scope, resourcesService, true, function() {
+        function refreshServices(){
+            console.log("refreshing");
+            /*
             if ($scope.services.current.service) {
                 var lineage = getServiceLineage($scope.services.mapped, $scope.services.current.service);
                 for (var i=0; i < lineage.length; i++) {
@@ -597,12 +613,11 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
                     }
                     $scope.breadcrumbs.push(crumb);
                 }
-            }
+            }*/
 
-            loadSubServiceHosts();
-            $serviceHealth.update();
-        });*/
-    });
+            //loadSubServiceHosts();
+            //$serviceHealth.update();
+        }
 
     var wait = { hosts: false, running: false };
     var mashHostsToInstances = function() {
