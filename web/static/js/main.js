@@ -433,6 +433,7 @@ function aggregateVhostOptions(service) {
 }
 
 function refreshServices($scope, servicesService, cacheOk, extraCallback) {
+    /*
     // defend against empty scope
     if ($scope.services === undefined) {
         $scope.services = {};
@@ -467,6 +468,8 @@ function refreshServices($scope, servicesService, cacheOk, extraCallback) {
             extraCallback();
         }
     });
+    */
+   if(extraCallback) extraCallback();
 }
 
 function getFullPath(allPools, pool) {

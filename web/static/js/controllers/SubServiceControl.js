@@ -248,9 +248,9 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         return {'padding-left': (20*depth) + "px"};
     };
 
-    $scope.clickRunning = function(app, status, resourcesService){
+    $scope.clickRunning = function(app, status){
         toggleRunning(app, status, resourcesService);
-        $serviceHealth.update(app.ID);
+        $serviceHealth.update($servicesService.serviceMap);
     };
 
     function capitalizeFirst(str){
@@ -549,8 +549,6 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         }
     };
 
-    window.u = $scope.updateService;
-
     // Update the running instances so it is reflected when we save the changes
     function updateRunning() {
         if ($scope.params.serviceId) {
@@ -561,16 +559,7 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         }
     }
 
-    // only map services object when the servicesService
-    // is done loading up
-    $servicesService.init().then(function(){
-        // HACK - this is to get junk working!
-        $scope.services = {
-            data: $servicesService.serviceTree,
-            mapped: $servicesService.serviceMap,
-            current: $servicesService.getService($scope.params.serviceId),
-
-        };
+    $scope.update = function(){
         if($scope.services.current){
             $scope.services.subservices = $servicesService.getService($scope.params.serviceId).aggregateDescendents();
             $scope.vhosts.data = $servicesService.getService($scope.params.serviceId).aggregateVHosts();
@@ -594,30 +583,27 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         })($scope.services.current.parent);
 
         $scope.breadcrumbs = crumbs;
+
+        //loadSubServiceHosts();
+        $serviceHealth.update($servicesService.serviceMap);
+
+    };
+
+    // kick off service stuff and magic and everything
+    // NOTE THIS IS THE ENTRY POINT FOR THIS SERVICE!
+    $servicesService.init().then(function(){
+        $scope.services = {
+            data: $servicesService.serviceTree,
+            mapped: $servicesService.serviceMap,
+            current: $servicesService.getService($scope.params.serviceId)
+        };
+
+        // if the current service changes, update 
+        // various service controller thingies
+        $scope.$watch(function(){
+            return $servicesService.getService($scope.params.serviceId); 
+        }, $scope.update);
     });
-
-        // Get a list of deployed apps
-        function refreshServices(){
-            console.log("refreshing");
-            /*
-            if ($scope.services.current.service) {
-                var lineage = getServiceLineage($scope.services.mapped, $scope.services.current.service);
-                for (var i=0; i < lineage.length; i++) {
-                    var crumb = {
-                        label: lineage[i].Name
-                    };
-                    if (i == lineage.length - 1) {
-                        crumb.itemClass = 'active';
-                    } else {
-                        crumb.url = '#/services/' + lineage[i].ID;
-                    }
-                    $scope.breadcrumbs.push(crumb);
-                }
-            }*/
-
-            //loadSubServiceHosts();
-            //$serviceHealth.update();
-        }
 
     var wait = { hosts: false, running: false };
     var mashHostsToInstances = function() {
@@ -634,10 +620,12 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         mashHostsToInstances();
     });
 
+    /*
     refreshRunningForService($scope, resourcesService, $scope.params.serviceId, function() {
         wait.running = true;
         mashHostsToInstances();
     });
+    */
 
     $scope.killRunning = function(app) {
         resourcesService.kill_running(app.HostID, app.ID, function() {
@@ -760,8 +748,8 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
         runningServiceDeferred.resolve();
 
 
-        resourcesService.registerPoll("serviceHealth", $serviceHealth.update, 3000);
-        resourcesService.registerPoll("running", updateRunning, 3000);
+        //resourcesService.registerPoll("serviceHealth", $serviceHealth.update, 3000);
+        //resourcesService.registerPoll("running", updateRunning, 3000);
     }
 
     $scope.toggleChildren = function($event, app){
@@ -815,39 +803,29 @@ function SubServiceControl($scope, $q, $routeParams, $location, resourcesService
     };
 
     function hideChildren(app){
-        if(app.children){
-            for(var i=0; i<app.children.length; ++i){
-                var child = app.children[i];
-                $("tr[data-id='" + child.ID + "'] td").hide();
-                if(child.children !== undefined){
-                    hideChildren(child);
-                }
-            }
-        }
+        app.children.forEach(function(child){
+            $("tr[data-id='" + child.id + "'] td").hide();
+            hideChildren(child);
+        });
 
         //update icons
-        $e = $("tr[data-id='"+app.ID+"'] td .glyphicon-chevron-down");
+        $e = $("tr[data-id='"+app.id+"'] td .glyphicon-chevron-down");
         $e.removeClass("glyphicon-chevron-down");
         $e.addClass("glyphicon-chevron-right");
     }
 
     function showChildren(app){
-        if(app.children){
-            for(var i=0; i<app.children.length; ++i){
-                var child = app.children[i];
-                $("tr[data-id='" + child.ID + "'] td").show();
-                if(child.children !== undefined){
-                    showChildren(child);
-                }
-            }
-        }
+        app.children.forEach(function(child){
+            $("tr[data-id='" + child.id + "'] td").show();
+            showChildren(child);
+        });
 
         //update icons
-        $e = $("tr[data-id='"+app.ID+"'] td .glyphicon-chevron-right");
+        $e = $("tr[data-id='"+app.id+"'] td .glyphicon-chevron-right");
         $e.removeClass("glyphicon-chevron-right");
         $e.addClass("glyphicon-chevron-down");
     }
-    
+
     // Ensure we have a list of pools
     refreshPools($scope, resourcesService, false);
 }

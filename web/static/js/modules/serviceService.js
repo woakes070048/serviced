@@ -10,8 +10,8 @@
         serviceMap = {};
 
     angular.module('servicesService', []).
-    factory("$servicesService", ["$rootScope", "$q", "resourcesService", "$interval",
-    function($rootScope, $q, resourcesService, $interval){
+    factory("$servicesService", ["$rootScope", "$q", "resourcesService", "$interval", "$serviceHealth",
+    function($rootScope, $q, resourcesService, $interval, serviceHealth){
 
         init();
 
@@ -67,6 +67,8 @@
                             // TODO - deleted serviced
                         });
                     });
+                // HACK - services should update themselves
+                serviceHealth.update(serviceMap);
             });
         }
 
@@ -96,7 +98,7 @@
                             addServiceToTree(service);
                         }
                   });
-                  setInterval(update, 3000);
+                setInterval(update, 3000);
             }
 
             return initPromise;
