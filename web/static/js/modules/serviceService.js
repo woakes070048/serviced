@@ -7,12 +7,19 @@
     // services in tree form
     var serviceTree = [],
     // service dictionary keyed by id
-        serviceMap = {};
+        serviceMap = {},
+        // make angular share with everybody!
+        resourcesService, $q;
+
+    var UPDATE_FREQUENCY = 3000;
 
     angular.module('servicesService', []).
     factory("$servicesService", ["$rootScope", "$q", "resourcesService", "$interval", "$serviceHealth",
-    function($rootScope, $q, resourcesService, $interval, serviceHealth){
+    function($rootScope, q, $resourcesService, $interval, serviceHealth){
 
+        // share resourcesService throughout
+        resourcesService = $resourcesService;
+        $q = q;
         init();
 
         return {
@@ -33,9 +40,9 @@
             get: function(name){
                 for(var id in serviceMap){
                     if(serviceMap[id].name === name){
-                        return serviceMap[id]; 
-                    } 
-                } 
+                        return serviceMap[id];
+                    }
+                }
             }
         };
 
@@ -46,9 +53,10 @@
         // TODO - update list by application instead
         // of all services ever?
         function update(){
-            // TODO - use resourcesService to make requests
+            var deferred = $q.defer();
+
             initPromise.then(function(){
-                $.get("/services?since=4000&testy='testy'")
+                resourcesService.get_services(UPDATE_FREQUENCY + 1000)
                     .success(function(data, status){
                         // TODO - change backend to send
                         // updated, created, and deleted
@@ -66,10 +74,14 @@
 
                             // TODO - deleted serviced
                         });
+
+                        deferred.resolve();
                     });
                 // HACK - services should update themselves
                 serviceHealth.update(serviceMap);
             });
+
+            return deferred.promise;
         }
 
         var initPromise;
@@ -80,8 +92,7 @@
             // if init hasnt been called, create a new promise
             // and make the initial request for services
             if(!initPromise){
-                // TODO - use resourcesService to make requests
-                initPromise = $.get('/services')
+                initPromise = resourcesService.get_services()
                     .success(function(data, status) {
 
                         var service, parent;
@@ -98,7 +109,7 @@
                             addServiceToTree(service);
                         }
                   });
-                setInterval(update, 3000);
+                setInterval(update, UPDATE_FREQUENCY);
             }
 
             return initPromise;
@@ -127,6 +138,7 @@
             // iterate tree and store tree depth on
             // individual services
             // TODO - find a more elegant way to keep track of depth
+            // TODO - remove apps from service tree if they get a parent
             serviceTree.forEach(function(topService){
                 topService.depth = 0;
                 topService.children.forEach(function recurse(service){
@@ -149,18 +161,15 @@
         console.log("Creating service", service.Name);
         this.parent = parent;
         this.children = [];
+        this.instances = [];
 
         // tree depth
         this.depth = 0;
 
         // cache for computed values
-        this.cache = new Cache(["vhosts", "addresses", "descendents", "instances"]);
+        this.cache = new Cache(["vhosts", "addresses", "descendents"]);
 
         this.update(service);
-
-        // these properties are for convenience
-        this.name = service.Name;
-        this.id = service.ID;
 
         // this newly created child should be
         // registered with its parent
@@ -170,32 +179,54 @@
         }
     }
 
+
+    // service types
+    // internal service
+    var ISVC = "isvc",
+        // a service with no parent
+        APP = "app",
+        // a service with children but no
+        // startup command
+        META = "meta";
+
+    // DesiredState enum
+    var START = 1,
+        STOP = 0,
+        RESTART = -1;
+
     Service.prototype = {
         constructor: Service,
 
         // updates the immutable service object
         // and marks any computed properties dirty
         update: function(service){
-            // make service immutable
-            this.service = Object.freeze(service);
-            
-            // these properties are for convenience
-            this.name = service.Name;
-            this.id = service.ID;
+            if(service){
+                this.updateServiceDef(service);
+            }
 
             // TODO - update service health
-
-            // infer service type
-            // TODO - check for more types
-            // TODO - set a type property 
-            if(this.service.ID.indexOf("isvc-") != -1){
-                this.isvc = true;
-            }
+            this.evaluateServiceType();
 
             // invalidate caches
             this.markDirty();
 
+            // notify parent that this is now dirty
+            if(this.parent){
+                this.parent.update();
+            }
+
             console.log("Updating service", this.service.Name);
+        },
+
+        updateServiceDef: function(service){
+            // these properties are for convenience
+            this.name = service.Name;
+            this.id = service.ID;
+            // NOTE: desiredState is mutable to improve UX
+            this.desiredState = service.DesiredState;
+
+            // make service immutable
+            this.service = Object.freeze(service);
         },
 
         // invalidate all caches. This is needed 
@@ -205,19 +236,38 @@
             console.log("Invalidating all caches", this.service.Name);
         },
 
+        evaluateServiceType: function(){
+            // infer service type
+            // TODO - check for more types
+            this.type = [];
+            if(this.service.ID.indexOf("isvc-") != -1){
+                this.type.push(ISVC);
+            }
+
+            if(!this.parent){
+                this.type.push(APP);
+            }
+
+            if(this.children.length && !this.service.Startup){
+                this.type.push(META);
+            }
+
+            console.log(this.name, "is of type", this.type);
+        },
+
         addChild: function(service){
             // TODO - check for duplicates?
             this.children.push(service);
 
-            this.markDirty();
-
             // alpha sort children
             this.children.sort(sortServicesByName);
+
+            this.update();
         },
 
         removeChild: function(service){
             // TODO - remove child
-            this.markDirty();
+            this.update();
         },
 
         addParent: function(service){
@@ -225,7 +275,21 @@
                 this.parent.removeChild(this);
             }
             this.parent = service;
-            this.markDirty();
+            this.update();
+        },
+
+        // start, stop, or restart this service
+        start: function(skipChildren){
+            resourcesService.start_service(this.id, function(){}, skipChildren);
+            this.desiredState = START;
+        },
+        stop: function(skipChildren){
+            resourcesService.stop_service(this.id, function(){}, skipChildren);
+            this.desiredState = STOP;
+        },
+        restart: function(skipChildren){
+            resourcesService.restart_service(this.id, function(){}, skipChildren);
+            this.desiredState = RESTART;
         },
 
         // returns a list of VHosts for
@@ -263,7 +327,8 @@
                                     Name: VHost,
                                     Application: service.name,
                                     ServiceEndpoint: endpoint.Application,
-                                    ApplicationId: service.id
+                                    ApplicationId: service.id,
+                                    Value: service.name +" - "+ endpoint.Application
                                 });
                             });
                         }
@@ -314,8 +379,6 @@
                                 AssignmentType: endpoint.AddressAssignment.AssignmentType,
                                 EndpointName: endpoint.AddressAssignment.EndpointName,
                                 HostID: endpoint.AddressAssignment.HostID,
-                                // TODO - lookup host name from resourcesService.get_host
-                                HostName: "unknown",
                                 PoolID: endpoint.AddressAssignment.PoolID,
                                 IPAddr: endpoint.AddressAssignment.IPAddr,
                                 Port: endpoint.AddressConfig.Port,
@@ -332,7 +395,6 @@
 
             this.cache.cache("addresses", addresses);
             return addresses;
-
         },
 
         // returns a flat map of all descendents
@@ -353,37 +415,85 @@
                 this.cache.cache("descendents", descendents);
                 return descendents;
             }
-
         },
 
         // returns a promise good for a list
-        // of running service instances
+        // of running srvice instances
         getInstances: function(){
-            var deferred = $q.defer(),
-                cachedInstances = this.cache.getIfClean("instances");
+            var deferred = $q.defer();
 
-            // if instances is cached and not dirty,
-            // return those
-            if(cachedInstances){
-                console.log("Resolving cached instances for", this.name);
-                deferred.resolve(cachedInstances);
+            resourcesService.get_running_services_for_service(this.id)
+                .success(function(newInstances, status) {
+                    // TODO - generate Instance objects?
 
-            // otherwise, refresh instances
-            } else {
-                // TODO - use resourcesService to make requests
-                $.get("/services/"+ this.id +"/running")
-                    .success(function(data, status) {
-                        // TODO - generate Instance objects?
-                        this.cache.cache("instances", data);
-                        console.log("Retrieving instances for", this.name);
-                        deferred.resolve(data);
-                    }.bind(this));
-            }
+                    mergeArray(this.instances, newInstances, "ID");
+                    this.instances.sort(function(a,b){
+                        return a.InstanceID > b.InstanceID;
+                    });
+                    deferred.resolve(this.instances);
+                }.bind(this));
 
-            return deferred;
-
+            return deferred.promise;
         },
+
+        // some convenience methods
+        isIsvc: function(){
+            return !!~this.type.indexOf(ISVC);
+        },
+
+        isApp: function(){
+            return !!~this.type.indexOf(APP);
+        },
+
+        // if any cache is dirty, this whole object
+        // is dirty
+        isDirty: function(){
+            return this.cache.anyDirty();
+        }
     };
+
+
+    // merge arrays of objects. Merges array b into array
+    // a based on the provided key/predicate. if already
+    // exists in a, a shallow merge or merge function is used.
+    // if anything is not present in b that is present in a,
+    // it is removed from a. a is mutated by this function
+    // TODO - make key into a predicate function
+    function mergeArray(a, b, key, merge){
+        // default to shallow merge
+        merge = merge || function(a, b){
+            for(var i in a){
+                a[i] = b[i];
+            }
+        };
+
+        var oldKeys = a.map(function(el){ return el[key]; });
+
+        b.forEach(function(el){
+            var oldElIndex = oldKeys.indexOf(el.ID);
+
+            // update
+            if(oldElIndex !== -1){
+                merge(a[oldElIndex], el);
+
+                // nullify id in list
+                oldKeys[oldElIndex] = null;
+
+            // add
+            } else {
+                a.push(el);
+            }
+        });
+
+        // delete
+        for(var i = a.length - 1; i >= 0; i--){
+            if(~oldKeys.indexOf(a[i][key])){
+                a.splice(i, 1);
+            }
+        }
+
+        return a;
+    }
 
 
 
@@ -434,10 +544,18 @@
             }
         },
         mark: function(name, flag){
-            this.caches[name].dirty = flag; 
+            this.caches[name].dirty = flag;
         },
         isDirty: function(name){
             return this.caches[name].dirty;
+        },
+        anyDirty: function(){
+            for(var i in this.caches){
+                if(this.caches[i].dirty){
+                    return true;
+                }
+            }
+            return false;
         }
     };
 

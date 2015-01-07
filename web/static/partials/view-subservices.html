@@ -10,18 +10,18 @@
                 <span class="version" ng-show="services.current.service.Version"> (v{{services.current.service.Version}})</span>
             </h2>
 
-            <div class="serviceActions">
+            <div class="serviceActions" ng-hide="services.current.isIsvc()">
                 <button ng-click="editCurrentService()" class="btn btn-link action"><i class="glyphicon glyphicon-edit"></i> Edit Service</button>
                 <button ng-click="clickEditContext(services.current.service, servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-edit"></i> {{'edit_context'|translate}}</button>
 
                 <div style="display: inline-block; padding-left: 10px; border-left: 1px solid #CCC; height: 1em; "></div>
-                <div ng-if="services.current.service.DesiredState !== 2" style="display: inline-block;">
-                    <button ng-click="clickRunningApp(services.current.service, 'start', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-play"></i> {{'start'|translate}}</button>
-                    <button ng-click="clickRunningApp(services.current.service, 'stop', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-stop"></i> {{'stop'|translate}}</button>
-                    <button ng-class="{disabled: services.current.service.DesiredState === 0}" ng-click="clickRunningApp(services.current.service, 'restart', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-refresh"></i> {{'action_restart'|translate}}</button>
+                <div ng-if="services.current.desiredState !== 2" style="display: inline-block;">
+                    <button ng-click="clickRunningApp(services.current, 'start')" class="btn btn-link action"><i class="glyphicon glyphicon-play"></i> {{'start'|translate}}</button>
+                    <button ng-click="clickRunningApp(services.current, 'stop')" class="btn btn-link action"><i class="glyphicon glyphicon-stop"></i> {{'stop'|translate}}</button>
+                    <button ng-class="{disabled: services.current.desiredState === 0}" ng-click="clickRunningApp(services.current, 'restart')" class="btn btn-link action"><i class="glyphicon glyphicon-refresh"></i> {{'action_restart'|translate}}</button>
                 </div>
 
-                <div ng-if="services.current.service.DesiredState === 2" style="display: inline-block;">
+                <div ng-if="services.current.desiredState === 2" style="display: inline-block;">
                     <span class="btn btn-link action disabled"><i class="glyphicon glyphicon-pause"></i> Paused</span>
                 </div>
             </div>
@@ -35,7 +35,7 @@
     </div>
 
     <!-- Virtual Host Names -->
-  <div ng-if="!services.current.isvc && anyServicesExported(services.current.service)">
+  <div ng-if="!services.current.isIsvc() && anyServicesExported(services.current.service)">
     <h3 class="pull-left">{{'label_vhost_names'|translate}}</h3>
     <div class="control-buttons pull-right">
         <span class="add-control">
@@ -73,7 +73,7 @@
     </table>
   </div>
     <!-- IP Assignments -->
-  <div ng-if="!services.current.isvc">
+  <div ng-if="!services.current.isIsvc()">
     <h3 class="pull-left">{{'label_ip_assignments'|translate}}</h3>
     <table class="table" id="ips_data">
         <thead>
@@ -95,7 +95,7 @@
             <tr ng-repeat="ip in ips.data | orderBy:ips.sort">
                 <td ng-click="click_app(ip.ServiceID)" class="link">{{ip.ServiceName}}</td>
                 <td>{{ip.AssignmentType}}</td>
-                <td ng-click="click_host(ip.HostID)" class="link">{{ip.HostName}}</td>
+                <td ng-click="click_host(ip.HostID)" class="link">{{getHostName(ip.HostID)}}</td>
                 <td ng-click="click_pool(ip.PoolID)" class="link">{{ip.PoolID|cut:true:50}}</td>
                 <td>{{ip.IPAddr}}:{{ip.Port}}</td>
                 <td> <button ng-click="modalAssignIP(ip, ip.PoolID)" class="btn btn-link action"><i class="glyphicon glyphicon-link"></i> {{'label_assign'|translate}}</button> </td>
@@ -105,7 +105,7 @@
   </div>
 
     <!-- Config Files -->
-  <div ng-if="!services.current.isvc">
+  <div ng-if="!services.current.isIsvc()">
     <h3 class="pull-left">{{'title_config_files' | translate }}</h3>
     <table class="table">
         <thead>
@@ -140,7 +140,7 @@
           <th style="white-space: nowrap; width:200px;">{{'label_service'|translate}}</th>
           <th style="width: 75px; line-height: 11px;">Instances <span style="font-size: .75em;">healthy/total</span></th>
           <th style="width: 600px;">{{'deployed_tbl_description'|translate}}</th>
-          <th ng-if="!services.current.isvc">{{'running_tbl_actions'|translate}}</th>
+          <th ng-if="!services.current.isIsvc()">{{'running_tbl_actions'|translate}}</th>
         </tr>
       </thead>
       <tbody>
@@ -152,7 +152,7 @@
         </tr>
         <tr ng-repeat="app in services.subservices" data-id="{{app.service.ID}}">
           <td>
-            <span ng-style="indent(app.depth - 1)"></span>
+            <span ng-style="calculateIndent(app)"></span>
             <span ng-if="app.children.length" ng-click="toggleChildren($event, app)" class="table-collapse glyphicon glyphicon-chevron-down"></span>
             <span ng-if="!app.children.length" ng-style="indent(1)"></span>
             <span ng-click="click_app(app.service.ID)" class="link">
@@ -160,21 +160,21 @@
             </span>
           </td>
           <td style="text-align:center;">
-            <div ng-if="app.children === undefined">
+            <div ng-if="!app.children.length">
               <div class="healthCheck" data-id="{{app.service.ID}}"></div>
             </div>
           </td>
           <td>
             <input style="border:none; background:rgba(0,0,0,0); width:100%; outline: none;" readonly type="text" value="{{app.service.Description}}">
           </td>
-          <td ng-if="!services.current.isvc">
-            <div ng-if="!app.isvc">
-              <div ng-if="app.service.DesiredState !== 2">
-                <button ng-class="{disabled: app.service.DesiredState === 1}" ng-click="clickRunning(app.service, 'start', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-play"></i> {{'start'|translate}}</button>
-                <button ng-class="{disabled: app.service.DesiredState === 0}" ng-click="clickRunning(app.service, 'stop', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-stop"></i> {{'stop'|translate}}</button>
-                <button ng-class="{disabled: app.service.DesiredState === 0}" ng-click="clickRunning(app.service, 'restart', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-refresh"></i> {{'action_restart'|translate}}</button>
+          <td ng-if="!services.current.isIsvc()">
+            <div ng-if="!app.isIsvc()">
+              <div ng-if="app.desiredState !== 2">
+                <button ng-class="{disabled: app.desiredState === 1}" ng-click="clickRunning(app, 'start', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-play"></i> {{'start'|translate}}</button>
+                <button ng-class="{disabled: app.desiredState === 0}" ng-click="clickRunning(app, 'stop', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-stop"></i> {{'stop'|translate}}</button>
+                <button ng-class="{disabled: app.desiredState === 0}" ng-click="clickRunning(app, 'restart', servicesService)" class="btn btn-link action"><i class="glyphicon glyphicon-refresh"></i> {{'action_restart'|translate}}</button>
               </div>
-              <div ng-if="app.service.DesiredState === 2">
+              <div ng-if="app.desiredState === 2">
                 <span class="btn btn-link action disabled"><i class="glyphicon glyphicon-pause"></i> Paused</span>
               </div>
             </div>
@@ -184,8 +184,8 @@
     </table>
 
   <!-- This table has running instances -->
-  <h3 ng-show="running.data.length > 0">{{'running_tbl_instances'|translate}}</h3>
-  <table class="table" ng-show="running.data.length > 0">
+  <h3 ng-show="services.current && services.current.instances.length > 0">{{'running_tbl_instances'|translate}}</h3>
+  <table class="table" ng-show="services.current && services.current.instances.length">
     <thead>
       <tr>
         <th>{{'running_tbl_instance_id'|translate}}</th>
@@ -197,19 +197,19 @@
       </tr>
     </thead>
     <tbody>
-      <tr ng-hide="running.data !== undefined">
+      <tr ng-hide="services.current && services.current.instances.length !== undefined">
         <td colspan="100%" align="center"><img src="/static/img/loading.gif"></td>
       </tr>
-      <tr ng-hide="running.data.length !== 0">
+      <tr ng-hide="services.current && services.current.instances.length">
           <td colspan="100%"><i class="glyphicon glyphicon-ban-circle" style="font-size: .9em; padding-right: 5px;"></i>{{"no_data" | translate}}</td>
       </tr>
-      <tr ng-repeat="app in running.data | orderBy:running.sort" data-id="{{app.ID}}.{{app.InstanceID}}">
+      <tr ng-repeat="app in services.current.instances" data-id="{{app.ID}}.{{app.InstanceID}}">
         <td>{{app.InstanceID}}</td>
         <td>{{app.Name}}</td>
         <td style="text-align:center;">
           <div class="healthCheck" data-id="{{app.ServiceID}}.{{app.InstanceID}}"></div>
         </td>
-        <td ng-click="click_host(app.HostID)" class="link">{{app.hostName}}</td>
+        <td ng-click="click_host(app.HostID)" class="link">{{getHostName(app.HostID)}}</td>
         <td>{{app.DockerID}}</td>
         <td>
           <button ng-click="viewLog(app)" class="btn btn-link action"><i class="glyphicon glyphicon-list-alt"></i> {{'action_view_log'|translate}}</button>
@@ -219,7 +219,7 @@
     </tbody>
   </table>
 
-  <div ng-if="!services.current.isvc">
+  <div ng-if="!services.current.isIsvc()">
     <h3>{{'scheduled_tasks'|translate}}</h3>
       <table class="table">
           <thead>
