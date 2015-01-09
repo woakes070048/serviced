@@ -40,6 +40,7 @@
             serviceTree: serviceTree,
             serviceMap: serviceMap,
             init: init,
+            updateHealth: updateHealth,
             // get by name
             get: function(name){
                 for(var id in serviceMap){
@@ -77,17 +78,15 @@
                             }
 
                             // TODO - deleted serviced
+
                         });
+
+                        // HACK - services should update themselves?
+                        updateHealth();
 
                         deferred.resolve();
                     });
-                // HACK - services should update themselves?
-                serviceHealth.update(serviceMap).then(function(statuses){
-                    for(var id in serviceMap){
-                        // TODO - set status via method?
-                        serviceMap[id].status = statuses[id];
-                    }
-                });
+                
             });
 
             return deferred.promise;
@@ -117,6 +116,8 @@
                             service = serviceMap[serviceId];
                             addServiceToTree(service);
                         }
+
+                        updateHealth();
                   });
                 setInterval(update, UPDATE_FREQUENCY);
             }
@@ -154,6 +155,33 @@
                     service.depth = service.parent.depth + 1;
                     service.children.forEach(recurse);
                 });
+            });
+        }
+
+        // HACK - individual services should update
+        // their own health
+        // TODO - debounce this guy
+        function updateHealth(){
+            serviceHealth.update(serviceMap).then(function(statuses){
+                var ids, instance;
+
+                for(var id in statuses){
+                    // attach status to associated service
+                    if(serviceMap[id]){
+                        serviceMap[id].status = statuses[id]; 
+
+                    // this may be a service instance
+                    } else if(~id.indexOf(".")){
+                        ids = id.split(".");
+                        if(serviceMap[ids[0]]){
+                            instance = serviceMap[ids[0]].instances.filter(function(instance){
+                                // ids[1] will be a string, and InstanceID is a number
+                                return instance.InstanceID === +ids[1]; 
+                            });
+                            if(instance.length) instance[0].status = statuses[id];
+                        }
+                    }
+                }
             });
         }
 

@@ -47,7 +47,7 @@
           <td ng-click="click_app(app.id)" class="link">{{app.name}}<span class="version" ng-show="app.service.Version"> (v{{app.service.Version}})</span></td>
           <td>{{app.service.Description}}</td>
           <td style="text-align:center;">
-              <div class="healthCheck" data-id="{{app.id}}"></div>
+              <health-icon data-status="app.status"></health-icon>
           </td>
           <td>{{app.service.DeploymentID}}</td>
 
