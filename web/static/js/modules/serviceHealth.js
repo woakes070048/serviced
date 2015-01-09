@@ -4,17 +4,10 @@
     'use strict';
 
     angular.module('serviceHealth', []).
-    factory("$serviceHealth", ["$rootScope", "$q", "resourcesFactory", "$interval", "$translate",
-    function($rootScope, $q, resourcesFactory, $interval, $translate){
+    factory("$serviceHealth", ["$rootScope", "$q", "resourcesFactory", "$translate",
+    function($rootScope, $q, resourcesFactory, $translate){
 
         var statuses = {};
-
-        var STATUS_STYLES = {
-            "bad": "glyphicon glyphicon-exclamation bad",
-            "good": "glyphicon glyphicon-ok good",
-            "unknown": "glyphicon glyphicon-question unknown",
-            "down": "glyphicon glyphicon-minus disabled"
-        };
 
         // simple array search util
         function findInArray(key, arr, val){
@@ -40,7 +33,7 @@
                 healthCheckDeferred.resolve(healthChecks);
             });
 
-            $q.all({
+            return $q.all({
                 services: servicesDeferred.promise,
                 health: healthCheckDeferred.promise
             }).then(function(results){
@@ -83,7 +76,10 @@
                     statuses[serviceId] = serviceStatus;
                 }
 
-                updateHealthCheckUI(statuses);
+                //updateHealthCheckUI(statuses);
+            
+                // NOTE: resolves returned promise with statuses object
+                return statuses;
 
             }).catch(function(err){
                 // something went awry
@@ -283,6 +279,7 @@
             return status;
         }
 
+        /*
         var healthcheckTemplate = '<i class="healthIcon glyphicon"></i><div class="healthIconBadge"></div>';
 
         function updateHealthCheckUI(statuses){
@@ -474,10 +471,13 @@
                 // clean up animation end listener
                 $el.off("webkitAnimationEnd animationend");
             });
-        }
+        }*/
 
         return {
-            update: update
+            update: update,
+            get: function(id){
+                return statuses[id];
+            }
         };
     }]);
 

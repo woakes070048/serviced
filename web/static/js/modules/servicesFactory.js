@@ -10,20 +10,22 @@
     // service dictionary keyed by id
         serviceMap = {},
         // make angular share with everybody!
-        resourcesFactory, $q;
+        resourcesFactory, $q, serviceHealth;
 
     var UPDATE_FREQUENCY = 3000;
 
     angular.module('servicesFactory', []).
     factory("servicesFactory", ["$rootScope", "$q", "resourcesFactory", "$interval", "$serviceHealth",
-    function($rootScope, q, _resourcesFactory, $interval, serviceHealth){
+    function($rootScope, q, _resourcesFactory, $interval, _serviceHealth){
 
         // share resourcesFactory throughout
         resourcesFactory = _resourcesFactory;
+        serviceHealth = _serviceHealth;
         $q = q;
         init();
 
         // public interface for servicesFactory
+        // TODO - evaluate what should be exposed
         return {
             // returns a service by id
             getService: function(id){
@@ -79,8 +81,13 @@
 
                         deferred.resolve();
                     });
-                // HACK - services should update themselves
-                serviceHealth.update(serviceMap);
+                // HACK - services should update themselves?
+                serviceHealth.update(serviceMap).then(function(statuses){
+                    for(var id in serviceMap){
+                        // TODO - set status via method?
+                        serviceMap[id].status = statuses[id];
+                    }
+                });
             });
 
             return deferred.promise;
@@ -205,7 +212,11 @@
                 this.updateServiceDef(service);
             }
 
-            // TODO - update service health
+            // update service health
+            // TODO - should service update itself, its controller
+            // update the service, or serviceHealth update all services?
+            this.status = serviceHealth.get(this.id);
+
             this.evaluateServiceType();
 
             // invalidate caches

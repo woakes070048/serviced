@@ -5,7 +5,6 @@
         <div class="serviceControls" sticky sticky-class="stickied">
 
             <h2 class="serviceTitle">
-                <div ng-if="services.current.children === undefined || services.current.service.Startup" class="healthCheck" data-id="{{services.current.service.ID}}" style="display: inline-block; font-size: .6em;"></div>
                 {{services.current.service.Name}}
                 <span class="version" ng-show="services.current.service.Version"> (v{{services.current.service.Version}})</span>
             </h2>
@@ -161,7 +160,7 @@
           </td>
           <td style="text-align:center;">
             <div ng-if="!app.children.length">
-              <div class="healthCheck" data-id="{{app.service.ID}}"></div>
+                <health-icon class="healthCheck" data-service="app"></health-icon>
             </div>
           </td>
           <td>
