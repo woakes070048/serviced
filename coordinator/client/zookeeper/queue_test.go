@@ -22,12 +22,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/control-center/serviced/coordinator/client"
 	zklib "github.com/samuel/go-zookeeper/zk"
 )
 
 func TestQueue(t *testing.T) {
-	/* start the cluster */
-	tc, err := zklib.StartTestCluster(1, nil, os.Stderr)
+	EnsureZkFatjar()
+	basePath := "/basePath"
+	tc, err := zklib.StartTestCluster(1, nil, nil)
 	if err != nil {
 		t.Fatalf("could not start test zk cluster: %s", err)
 	}
@@ -37,41 +39,40 @@ func TestQueue(t *testing.T) {
 
 	servers := []string{fmt.Sprintf("127.0.0.1:%d", tc.Servers[0].Port)}
 
-	// setup the driver
-	drv := Driver{}
 	dsnBytes, err := json.Marshal(DSN{Servers: servers, Timeout: time.Second * 15})
 	if err != nil {
-		t.Fatalf("unexpected error creating zk DSN: %s", err)
+		t.Fatal("unexpected error creating zk DSN: %s", err)
 	}
 	dsn := string(dsnBytes)
-
-	// create a connection
-	conn, err := drv.GetConnection(dsn, "/basePath")
+	zClient, err := client.New("zookeeper", dsn, basePath, nil)
+	conn, err := zClient.GetConnection()
 	if err != nil {
 		t.Fatal("unexpected error getting connection")
 	}
 
 	// create a queue
-	t.Log("create a queue")
-	if err := conn.CreateDir("/like/a/queue"); err != nil {
-		t.Fatal("unexpected error creating queue")
-	}
+	t.Logf("create a queue")
+	conn.Delete("/like/a/queue")
+	conn.CreateDir("/like/a/queue")
 	q := conn.NewQueue("/like/a/queue")
 
 	// verify the queue has no data
-	t.Log("checking queue data")
+	t.Logf("checking current node")
 	if err := q.Current(&testNodeT{}); err != ErrEmptyQueue {
 		t.Errorf("expected err %s; got err %s", ErrEmptyQueue, err)
 	}
 
+	t.Logf("checking next node")
 	if err := q.Next(&testNodeT{}); err != ErrEmptyQueue {
 		t.Errorf("expected err %s; got err %s", ErrEmptyQueue, err)
 	}
 
+	t.Logf("checking lock")
 	if q.HasLock() {
 		t.Errorf("unexpected lock found on queue!")
 	}
 
+	t.Logf("validating \"Consume\"")
 	if err := q.Consume(); err != ErrNotLocked {
 		t.Errorf("expected err %s; got %s", ErrNotLocked, err)
 	}
@@ -110,6 +111,7 @@ func TestQueue(t *testing.T) {
 	}
 
 	// verify you cannot hold more than one node in-flight on the same instance
+	t.Logf("Invalidating double get")
 	actual = testNodeT{}
 	if err := q.Get(&actual); err != ErrDeadlock {
 		t.Fatalf("expected err %+v; got err %+v", ErrDeadlock, err)
@@ -119,6 +121,7 @@ func TestQueue(t *testing.T) {
 	}
 
 	// verify the node is in flight
+	t.Logf("Verifying in-flight")
 	actual = testNodeT{}
 	if err := q.Current(&actual); err != nil {
 		t.Errorf("unexpected error getting the in-flight node in the queue: %s", err)
@@ -127,6 +130,7 @@ func TestQueue(t *testing.T) {
 	}
 
 	// verify the node is not enqueued
+	t.Logf("Verifying enqueue")
 	actual = testNodeT{}
 	if err := q.Next(&actual); err != ErrEmptyQueue {
 		t.Errorf("expected err %s; got err %s", ErrEmptyQueue, err)

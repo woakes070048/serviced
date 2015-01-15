@@ -46,52 +46,67 @@ type Queue struct {
 }
 
 func (q *Queue) prefix() string {
-	return join(q.path, "queue-")
+	return join(q.path, "q", "queue-")
 }
 
-func (q *Queue) lock(node string) (string, error) {
-	// do not lock the node if a lock is already available
-	if q.HasLock() {
-		return "", ErrDeadlock
-	}
+func (q *Queue) lockPrefix() string {
+	return join(q.path, "l", "lock-")
+}
 
-	if q.c.conn == nil {
-		// TODO: race condition exists
-		return "", fmt.Errorf("connection lost")
-	}
+func (q *Queue) lock() error {
+	var err error
+	prefix := q.lockPrefix()
+	root := path.Dir(prefix)
 
 	// create a lock node
-	prefix := join(q.path, node, "lock-")
-	path, err := q.c.conn.CreateProtectedEphemeralSequential(prefix, []byte{}, zklib.WorldACL(zklib.PermAll))
-	if err != nil {
-		return "", err
+	lockPath := ""
+	for i := 0; i < 3; i++ {
+		if q.c.conn == nil {
+			return fmt.Errorf("connection lost")
+		}
+
+		lockPath, err = q.c.conn.CreateProtectedEphemeralSequential(prefix, []byte{}, zklib.WorldACL(zklib.PermAll))
+		if err == zklib.ErrNoNode {
+			parts := strings.Split(root, "/")
+			pth := ""
+			for _, p := range parts[1:] {
+				pth += "/" + p
+				_, err := q.c.conn.Create(pth, []byte{}, 0, zklib.WorldACL(zklib.PermAll))
+				if err != nil && err != zklib.ErrNodeExists {
+					return err
+				}
+			}
+		} else if err != nil {
+			return err
+		} else {
+			break
+		}
 	}
 
-	seq, err := parseSeq(path)
+	// get the sequence
+	seq, err := parseSeq(lockPath)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	for {
 		if q.c.conn == nil {
 			// TODO: race condition exists
-			return "", fmt.Errorf("connection lost")
+			return fmt.Errorf("connection lost")
 		}
 
-		// ErrNoNode is ok here, because it means the parent has completed or cancelled its task
-		children, _, err := q.c.conn.Children(path)
+		children, _, err := q.c.conn.Children(root)
 		if err != nil {
-			return "", err
+			return err
 		}
 
-		// check if the instance owns the lock
 		lowestSeq := seq
-		var prevSeq uint64 = 0
+		prevSeq := uint64(0)
 		prevSeqPath := ""
 		for _, p := range children {
 			s, err := parseSeq(p)
 			if err != nil {
-				return "", err
+				return err
 			}
 			if s < lowestSeq {
 				lowestSeq = s
@@ -100,29 +115,41 @@ func (q *Queue) lock(node string) (string, error) {
 				prevSeq = s
 				prevSeqPath = p
 			}
+		}
 
-			if seq == lowestSeq {
-				// Acquired the lock
-				break
-			}
+		if seq == lowestSeq {
+			// acquired the lock
+			break
+		}
 
-			// Wait on the node next in line for the lock
-			_, _, ch, err := q.c.conn.GetW(join(q.path, prevSeqPath))
-			if err != nil && err != zklib.ErrNoNode {
-				return "", err
-			} else if err != nil && err == zklib.ErrNoNode {
-				// try again
-				continue
-			}
+		// wait on the node next in line for the lock
+		_, _, ch, err := q.c.conn.GetW(join(root, prevSeqPath))
+		if err == zklib.ErrNoNode {
+			continue
+		} else if err != nil {
+			return err
+		}
 
-			ev := <-ch
-			if ev.Err != nil {
-				return "", ev.Err
-			}
+		ev := <-ch
+		if ev.Err != nil {
+			return ev.Err
 		}
 	}
 
-	return path, nil
+	q.lockPath = lockPath
+	return nil
+}
+
+// HasLock returns true when the Queue instance owns the lock
+func (q *Queue) HasLock() bool {
+	if q.lockPath == "" {
+		return false
+	}
+	ok, _, _ := q.c.conn.Exists(q.lockPath)
+	if !ok {
+		q.lockPath = ""
+	}
+	return ok
 }
 
 // Put enqueues the desired node and returns the path to the node
@@ -132,89 +159,69 @@ func (q *Queue) Put(node client.Node) (string, error) {
 		return "", fmt.Errorf("connection lost")
 	}
 
-	prefix := q.prefix()
-
 	data, err := json.Marshal(node)
 	if err != nil {
 		return "", xlateError(err)
 	}
+	prefix := q.prefix()
+	root := path.Dir(prefix)
+	qpath := ""
 
 	// add the node to the queue
-	path := ""
 	for i := 0; i < 3; i++ {
 		if q.c.conn == nil {
 			// TODO: race condition exists
 			return "", fmt.Errorf("connection lost")
 		}
 
-		path, err := q.c.conn.CreateProtectedEphemeralSequential(prefix, data, zklib.WorldACL(zklib.PermAll))
+		qpath, err = q.c.conn.Create(prefix, data, zklib.FlagSequence, zklib.WorldACL(zklib.PermAll))
 		if err == zklib.ErrNoNode {
 			// Create parent node
-			parts := strings.Split(q.path, "/")
+			parts := strings.Split(root, "/")
 			pth := ""
 			for _, p := range parts[1:] {
-				path += "/" + p
 				if q.c.conn == nil {
 					// TODO: race condition exists
 					return "", fmt.Errorf("connection lost")
 				}
-
+				pth += "/" + p
 				_, err := q.c.conn.Create(pth, []byte{}, 0, zklib.WorldACL(zklib.PermAll))
 				if err != nil && err != zklib.ErrNodeExists {
 					return "", xlateError(err)
 				}
 			}
-		} else if err == nil {
-			break
-		} else {
+		} else if err != nil {
 			return "", xlateError(err)
+		} else {
+			break
 		}
 	}
 
-	if err != nil {
-		return "", xlateError(err)
-	}
-	return path, nil
+	return qpath, nil
 }
 
 // Get grabs and locks the next node in the queue
 func (q *Queue) Get(node client.Node) error {
-	if q.HasLock() {
-		return ErrDeadlock
-	}
-
 	if q.c.conn == nil {
 		// TODO: race condition exists
 		return fmt.Errorf("connection lost")
 	}
 
+	if q.HasLock() {
+		return ErrDeadlock
+	} else if err := q.lock(); err != nil {
+		return xlateError(err)
+	}
+
+	root := path.Dir(q.prefix())
 	for {
-		if q.c.conn == nil {
-			// TODO: race condition exists
-			return fmt.Errorf("connection lost")
-		}
-
-		// exhaust the current list of nodes loaded to find the next available
-		// to dequeue
 		for _, p := range q.children {
-			path := q.path + "/" + p
+			qpath := join(root, p)
 
-			// Lock the node
-			lockPath, err := q.lock(path)
+			data, stat, err := q.c.conn.Get(qpath)
 			if err == zklib.ErrNoNode {
 				q.children = q.children[1:]
 				continue
-			} else if err != nil {
-				return xlateError(err)
-			}
-
-			// Does the node still exist?
-			data, stat, err := q.c.conn.Get(path)
-			if err == zklib.ErrNoNode {
-				q.children = q.children[1:]
-				continue
-			} else if err != nil {
-				return xlateError(err)
 			}
 
 			if len(data) > 0 {
@@ -224,23 +231,21 @@ func (q *Queue) Get(node client.Node) error {
 			}
 
 			node.SetVersion(stat)
-			q.lockPath = lockPath
 			return xlateError(err)
 		}
 
-		// if no nodes are available in memory, check zookeeper for any new nodes
+		// if no nodes are stored in memory, check zookeeper for the next
+		// available node
 		for {
-			children, _, ch, err := q.c.conn.ChildrenW(q.path)
+			children, _, ch, err := q.c.conn.ChildrenW(root)
 			if err != nil {
 				return xlateError(err)
 			}
-
 			if len(children) > 0 {
 				sort.Sort(sortqueue(children))
 				q.children = children
 				break
 			}
-
 			ev := <-ch
 			if ev.Err != nil {
 				return xlateError(ev.Err)
@@ -251,137 +256,54 @@ func (q *Queue) Get(node client.Node) error {
 
 // Consume pops the inflight node off the queue
 func (q *Queue) Consume() error {
+	if q.c.conn == nil {
+		// TODO: race condition exists
+		return fmt.Errorf("lost connection")
+	}
+
 	if !q.HasLock() {
 		return ErrNotLocked
 	}
 
-	if q.c.conn == nil {
-		// TODO: race condition exists
-		return fmt.Errorf("lost connection")
-	}
-
-	// Delete the parent of the lockPath
-	if err := q.c.conn.Delete(path.Dir(q.lockPath), -1); err != nil {
-		return xlateError(err)
-	}
-
-	q.lockPath = ""
-	q.children = q.children[1:]
-	return nil
-}
-
-// HasLock returns true when the Queue instance owns the lock
-func (q *Queue) HasLock() bool {
-	if q.lockPath == "" {
-		return false
-	}
-
-	ok, _ := q.c.Exists(q.lockPath)
-	if !ok {
-		// this instance lost its lock, so reset the lockPath
-		q.lockPath = ""
-	}
-
-	return ok
-}
-
-// Current reveals the current inflight node on the queue
-func (q *Queue) Current(node client.Node) error {
-	if !q.HasLock() {
-		// if the instance doesn't own the lock, find the node with the current
-		// lock
-		for i := 0; i < 3; i++ {
-			if q.c.conn == nil {
-				// TODO: race condition exists
-				return fmt.Errorf("lost connection")
-			}
-
-			// verify the first node in the queue has a lock to indicate that
-			// it is inflight
-			for _, p := range q.children {
-				path := join(q.path, p)
-
-				children, _, err := q.c.conn.Children(path)
-				if err == zklib.ErrNoNode {
-					q.children = q.children[1:]
-					continue
-				} else if err != nil {
-					return xlateError(err)
-				}
-
-				if len(children) > 0 {
-					data, stat, err := q.c.conn.Get(path)
-					if err != nil {
-						return xlateError(err)
-					}
-
-					err = json.Unmarshal(data, node)
-					node.SetVersion(stat)
-					return xlateError(err)
-				}
-				return ErrNotLocked
-			}
-
-			// grab the current list of nodes and try again
-			children, _, err := q.c.conn.Children(q.path)
-			if err != nil {
-				return xlateError(err)
-			}
-			sort.Sort(sortqueue(children))
-			q.children = children
-		}
-		return ErrEmptyQueue
-	}
-
-	// this instance of Queue owns the lock, so return the node where this lock
-	// is held
-	if q.c.conn == nil {
-		// TODO: race condition exists
-		return fmt.Errorf("lost connection")
-	}
-	data, stat, err := q.c.conn.Get(path.Dir(q.lockPath))
-	if err != nil {
-		return xlateError(err)
-	}
-	err = json.Unmarshal(data, node)
-	node.SetVersion(stat)
+	err := q.c.conn.Delete(path.Dir(q.lockPath), -1)
 	return xlateError(err)
 }
 
-// Next reveals the next node to be dequeued
-func (q *Queue) Next(node client.Node) error {
-	for i := 0; i < 3; i++ {
-		// find the first node in the queue that does not own a lock
-		for _, p := range q.children {
-			path := join(q.path, p)
+// Current returns the node at the head of the queue
+func (q *Queue) Current(node client.Node) error {
+	root := path.Dir(q.prefix())
 
-			children, _, err := q.c.conn.Children(path)
+	for i := 0; i < 3; i++ {
+		if q.c.conn == nil {
+			// TODO: race condition exists
+			return fmt.Errorf("connection lost")
+		}
+
+		for _, p := range q.children {
+			qpath := join(root, p)
+			data, stat, err := q.c.conn.Get(qpath)
 			if err == zklib.ErrNoNode {
 				q.children = q.children[1:]
 				continue
-			} else if err != nil {
-				return xlateError(err)
 			}
-
-			if len(children) == 0 {
-				data, stat, err := q.c.conn.Get(path)
-				if err != nil {
-					return xlateError(err)
-				}
-
+			if len(data) > 0 {
 				err = json.Unmarshal(data, node)
-				node.SetVersion(stat)
-				return xlateError(err)
+			} else {
+				err = client.ErrEmptyNode
 			}
+			node.SetVersion(stat)
+			return xlateError(err)
 		}
-
-		// if all the nodes are stale, refresh the node list
 		children, _, err := q.c.conn.Children(q.path)
 		if err != nil {
 			return xlateError(err)
 		}
-		sort.Sort(sortqueue(children))
-		q.children = children
+		if len(children) > 0 {
+			sort.Sort(sortqueue(children))
+			q.children = children
+		} else {
+			break
+		}
 	}
 	return ErrEmptyQueue
 }

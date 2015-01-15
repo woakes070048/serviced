@@ -42,7 +42,6 @@ type Queue interface {
 	Consume() error
 	HasLock() bool
 	Current(Node) error
-	Next(Node) error
 }
 
 // Node is the interface that a serializable object must implement to

@@ -412,7 +412,9 @@ func (dfs *DistributedFilesystem) Restore(filename string) error {
 	return nil
 }
 
+// saveSnapshots saves the last n+1 snapshot volumes to a tgz in the specified path
 func (dfs *DistributedFilesystem) saveSnapshots(tenantID, directory string, last int) (string, []string, error) {
+	// create the temporary path to store the snapshot files
 	tmpdir := filepath.Join(directory, tenantID)
 
 	if err := mkdir(tmpdir); err != nil {
@@ -426,6 +428,7 @@ func (dfs *DistributedFilesystem) saveSnapshots(tenantID, directory string, last
 		}
 	}()
 
+	// get the current volume of the tenantID and take a snapshot of that volume
 	volume, err := dfs.GetVolume(tenantID)
 	if err != nil {
 		glog.Errorf("Could not get volume for %s: %s", tenantID, err)
@@ -457,23 +460,28 @@ func (dfs *DistributedFilesystem) saveSnapshots(tenantID, directory string, last
 
 	var parent string
 	for i, snapshot := range snapshots {
-		outfile := filepath.Join(tmpdir, fmt.Sprintf("%s.%d", label, i))
-		if err := volume.Export(label, parent, outfile); err != nil {
+		glog.V(0).Infof("Exporting snapshot %s", snapshot)
+		outfile := filepath.Join(tmpdir, fmt.Sprintf("%s.%d", snapshot, i))
+		if err := volume.Export(snapshot, parent, outfile); err != nil {
 			glog.Errorf("Could not export snapshot %s to %s: %s", label, outfile, err)
 			return "", nil, err
 		}
 		parent = snapshot
+		glog.V(0).Infof("Done exporting snapshot %s", snapshot)
 	}
 
+	glog.V(0).Infof("Compressing snapshots")
 	exportfile := fmt.Sprintf("%s.tgz", tmpdir)
 	if err := exportTGZ(tmpdir, exportfile); err != nil {
 		glog.Errorf("Could not write to tar file for %s: %s", tenantID, err)
 		return "", nil, err
 	}
+	glog.V(0).Infof("Done compressing snapshots")
 
 	return exportfile, snapshots, nil
 }
 
+// loadSnapshots
 func (dfs *DistributedFilesystem) loadSnapshots(tenantID, infile string) error {
 	tmpdir := filepath.Join(filepath.Dir(infile), tenantID)
 
