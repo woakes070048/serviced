@@ -165,7 +165,6 @@ func (c *ServicedCli) initService() {
 					cli.StringFlag{"saveas, s", "", "saves the service instance with the given name"},
 					cli.BoolFlag{"interactive, i", "runs the service instance as a tty"},
 					cli.StringSliceFlag{"mount", &cli.StringSlice{}, "bind mount: HOST_PATH[,CONTAINER_PATH]"},
-					cli.StringFlag{"endpoint", configEnv("ENDPOINT", getLocalAgentIP()), "endpoint for remote serviced (example.com:4979)"},
 				},
 			}, {
 				Name:         "run",
@@ -180,7 +179,6 @@ func (c *ServicedCli) initService() {
 					cli.StringFlag{"logstash-idle-flush-time", "100ms", "time duration for logstash to flush log messages"},
 					cli.StringFlag{"logstash-settle-time", "5s", "time duration to wait for logstash to flush log messages before closing"},
 					cli.StringSliceFlag{"mount", &cli.StringSlice{}, "bind mount: HOST_PATH[,CONTAINER_PATH]"},
-					cli.StringFlag{"endpoint", configEnv("ENDPOINT", getLocalAgentIP()), "endpoint for remote serviced (example.com:4979)"},
 					cli.StringFlag{"user", "", "container username used to run command"},
 				},
 			}, {
@@ -189,9 +187,6 @@ func (c *ServicedCli) initService() {
 				Description:  "serviced service attach { SERVICEID | SERVICENAME | DOCKERID | POOL/...PARENTNAME.../SERVICENAME/INSTANCE } [COMMAND]",
 				BashComplete: c.printServicesFirst,
 				Before:       c.cmdServiceAttach,
-				Flags: []cli.Flag{
-					cli.StringFlag{"endpoint", configEnv("ENDPOINT", getLocalAgentIP()), "endpoint for remote serviced (example.com:4979)"},
-				},
 			}, {
 				Name:         "action",
 				Usage:        "Run a predefined action in a running service container",
@@ -204,9 +199,6 @@ func (c *ServicedCli) initService() {
 				Description:  "serviced service logs { SERVICEID | SERVICENAME | DOCKERID | POOL/...PARENTNAME.../SERVICENAME/INSTANCE }",
 				BashComplete: c.printServicesFirst,
 				Before:       c.cmdServiceLogs,
-				Flags: []cli.Flag{
-					cli.StringFlag{"endpoint", configEnv("ENDPOINT", getLocalAgentIP()), "endpoint for remote serviced (example.com:4979)"},
-				},
 			}, {
 				Name:         "list-snapshots",
 				Usage:        "Lists the snapshots for a service",
@@ -921,7 +913,6 @@ func (c *ServicedCli) cmdServiceShell(ctx *cli.Context) error {
 		argv = args[2:]
 	}
 
-	agentPort := configEnv("RPC_PORT", fmt.Sprintf(":%d", defaultRPCPort))
 	config := api.ShellConfig{
 		ServiceID:        svc.ID,
 		Command:          command,
@@ -929,7 +920,7 @@ func (c *ServicedCli) cmdServiceShell(ctx *cli.Context) error {
 		SaveAs:           ctx.GlobalString("saveas"),
 		IsTTY:            isTTY,
 		Mounts:           ctx.GlobalStringSlice("mount"),
-		ServicedEndpoint: "localhost" + agentPort,
+		ServicedEndpoint: fmt.Sprintf("localhost:%s", api.GetOptionsRPCPort()),
 	}
 
 	if err := c.driver.StartShell(config); err != nil {
@@ -982,7 +973,6 @@ func (c *ServicedCli) cmdServiceRun(ctx *cli.Context) error {
 		argv = args[2:]
 	}
 
-	agentPort := configEnv("RPC_PORT", fmt.Sprintf(":%d", defaultRPCPort))
 	config := api.ShellConfig{
 		ServiceID:        svc.ID,
 		Command:          command,
@@ -991,7 +981,7 @@ func (c *ServicedCli) cmdServiceRun(ctx *cli.Context) error {
 		SaveAs:           dfs.NewLabel(svc.ID),
 		IsTTY:            ctx.GlobalBool("interactive"),
 		Mounts:           ctx.GlobalStringSlice("mount"),
-		ServicedEndpoint: "localhost" + agentPort,
+		ServicedEndpoint: fmt.Sprintf("localhost:%s", api.GetOptionsRPCPort()),
 		LogToStderr:      ctx.GlobalBool("logtostderr"),
 	}
 
@@ -1154,8 +1144,7 @@ func (c *ServicedCli) cmdServiceAttach(ctx *cli.Context) error {
 			hostmap[host.ID] = host
 		}
 
-		endpointArg := ctx.GlobalString("endpoint")
-		cmd := []string{"/usr/bin/ssh", "-t", hostmap[rs.HostID].IPAddr, "--", "serviced", "--endpoint", endpointArg, "service", "attach", args[0]}
+		cmd := []string{"/usr/bin/ssh", "-t", hostmap[rs.HostID].IPAddr, "--", "serviced", "--endpoint", api.GetOptionsRPCEndpoint(), "service", "attach", args[0]}
 		if len(args) > 1 {
 			cmd = append(cmd, args[1:]...)
 		}
@@ -1265,8 +1254,7 @@ func (c *ServicedCli) cmdServiceLogs(ctx *cli.Context) error {
 			hostmap[host.ID] = host
 		}
 
-		endpointArg := ctx.GlobalString("endpoint")
-		cmd := []string{"/usr/bin/ssh", "-t", hostmap[rs.HostID].IPAddr, "--", "serviced", "--endpoint", endpointArg, "service", "logs", args[0]}
+		cmd := []string{"/usr/bin/ssh", "-t", hostmap[rs.HostID].IPAddr, "--", "serviced", "--endpoint", api.GetOptionsRPCEndpoint(), "service", "logs", args[0]}
 		if len(args) > 1 {
 			cmd = append(cmd, args[1:]...)
 		}
