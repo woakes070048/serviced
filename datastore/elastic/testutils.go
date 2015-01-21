@@ -63,7 +63,7 @@ func (et *ElasticTest) setDefaults(c *gocheck.C) {
 
 //SetUpSuite Run once when the suite starts running.
 func (et *ElasticTest) SetUpSuite(c *gocheck.C) {
-	log.Printf("ElasticTest SetUpSuite called: %#v\n", et)
+	log.Printf("ElasticTest SetUpSuite called.\n")
 	et.setDefaults(c)
 	driver := newDriver("localhost", et.Port, et.Index)
 	et.driver = driver
@@ -171,9 +171,26 @@ func newTestCluster(elasticDir string, port uint16) (*testCluster, error) {
 	tc.cmd = cmd
 	go func() {
 		log.Printf("Starting elastic on port %v....: %v\n", port, command)
-		out, err := cmd.CombinedOutput()
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return
+		}
+		if err := cmd.Start(); err != nil {
+			return
+		}
+		err = cmd.Wait()
 		if err != nil && !tc.shutdown {
-			log.Printf("%s :%s\n", out, err) // do stuff
+			log.Printf("Error running elastic: %s\n", err)
+			if data, err := ioutil.ReadAll(stdout); err == nil {
+				log.Printf("Stdout: %s\n", string(data))
+			}
+			if data, err := ioutil.ReadAll(stderr); err == nil {
+				log.Printf("Stderr: %s\n", string(data))
+			}
 		}
 	}()
 	return tc, nil
