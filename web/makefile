@@ -16,9 +16,16 @@ UID = $(shell id -u)
 GID = $(shell id -g)
 PWD = $(shell pwd)
 
-javascript_TARGETS       = $(controlplane_JS) $(controlplane_MINIFIED_JS)
+javascript_BLDDIR        = $(PWD)/static/js
 controlplane_JS          = $(javascript_BLDDIR)/controlplane.js
 controlplane_MINIFIED_JS = $(javascript_BLDDIR)/controlplane.min.js
+javascript_3rdparty_BLDDIR = $(PWD)/static/thirdparty
+thirdparty_JS              = $(javascript_3rdparty_BLDDIR)/thirdparty.js
+thirdparty_MINIFIED_JS     = $(javascript_3rdparty_BLDDIR)/thirdparty.min.js
+javascript_TARGETS = $(controlplane_JS) $(controlplane_MINIFIED_JS) $(thirdparty_JS) $(thirdparty_MINIFIED_JS)
+
+NODEJS = $(shell which node)
+docker_working_DIR = "/mnt"
 
 .PHONY: default
 default: build
@@ -35,9 +42,18 @@ test: build
 
 .PHONY: build_js build-js
 build_js build-js:
-	docker pull zenoss/gulp
-	docker run --rm -v $(PWD)/:/mnt/ -e UID=$(UID) -e GID=$(GID) zenoss/gulp npm install
-	docker run --rm -v $(PWD)/:/mnt/ -e UID=$(UID) -e GID=$(GID) zenoss/gulp gulp release
+	if [ -x "$(NODEJS)" ]; then \
+		npm install; \
+		gulp release; \
+	else \
+		docker build -t zenoss/serviced-build ../build; \
+		docker run --rm \
+		-v $(PWD):$(docker_working_DIR) \
+		-e UID_X=$(shell id -u) \
+		-e GID_X=$(shell id -g) \
+		zenoss/serviced-build \
+		/bin/bash -c "source /root/userdo.sh \"cd $(docker_working_DIR) && npm install && gulp release\""; \
+	fi
 
 .PHONY: clean
 clean:

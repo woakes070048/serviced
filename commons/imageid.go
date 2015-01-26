@@ -18,13 +18,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/docker/docker/pkg/parsers"
 )
 
 // states that the parser can be in as it scans
@@ -82,17 +79,18 @@ func init() {
 //      Repo: core-unstable
 //      Tag:  latest
 func RenameImageID(dockerRegistry, tenantId string, imgID string, tag string) (*ImageID, error) {
-	// Sanitize the imgID of any tag it may contain, eg. "zenoss/core-unstable:theTAG"
-	repo, _ := parsers.ParseRepositoryTag(imgID)
-	// Get just the image name "resmgr-unstable" out of a long image string
-	// like "zenoss/resmgr-unstable"
-	re := regexp.MustCompile("/?([^/]+)\\z")
-	matches := re.FindStringSubmatch(repo)
-	if matches == nil {
-		return nil, errors.New("malformed imageid")
+	// Parse just to get the repo name out of imgID
+	if imgID == "" {
+		return nil, errors.New("Unable to parse empty image string")
 	}
-	name := matches[1]
-	newImageID := fmt.Sprintf("%s/%s/%s:%s", dockerRegistry, tenantId, name, tag)
+	throwawayImageIDString := fmt.Sprintf("%s/%s", dockerRegistry, imgID)
+	throwawayImageID, err := ParseImageID(throwawayImageIDString)
+	if err != nil {
+		return nil, err
+	}
+
+	// Now make a real string to parse
+	newImageID := fmt.Sprintf("%s/%s/%s:%s", dockerRegistry, tenantId, throwawayImageID.Repo, tag)
 	return ParseImageID(newImageID)
 }
 
@@ -103,7 +101,7 @@ func RenameImageID(dockerRegistry, tenantId string, imgID string, tag string) (*
 // port     = {digit}+
 // reponame = [user'/']repo
 // user     = {alpha|digit|'-'|'_'}+
-// repo     = {alpha|digit|'-'|'_'}+
+// repo     = {alpha|digit|'-'|'_'|'.'}+
 // tag      = {alpha|digit|'-'|'_'|'.'}+
 // The grammar is ambiguous so the parser is a little messy in places.
 func ParseImageID(iid string) (*ImageID, error) {
@@ -159,6 +157,11 @@ func ParseImageID(iid string) (*ImageID, error) {
 			switch {
 			case unicode.IsLetter(rune), unicode.IsDigit(rune), rune == dash, rune == underscore:
 				tokbuf = append(tokbuf, byte(rune))
+			case rune == period:
+				result.User = scanned[0]
+				scanned = []string{}
+				tokbuf = append(tokbuf, byte(rune))
+				state = scanningRepo
 			case rune == colon:
 				result.User = scanned[0]
 				scanned = []string{}
@@ -201,12 +204,16 @@ func ParseImageID(iid string) (*ImageID, error) {
 				result.Repo = string(tokbuf)
 				tokbuf = []byte{}
 				state = scanningTag
+			case rune == period:
+				result.User = ""
+				tokbuf = append(tokbuf, byte(rune))
+				state = scanningRepo
 			default:
 				return nil, fmt.Errorf("invalid ImageID %s: bad repo name", iid)
 			}
 		case scanningRepo:
 			switch {
-			case unicode.IsLetter(rune), unicode.IsDigit(rune), rune == dash, rune == underscore:
+			case unicode.IsLetter(rune), unicode.IsDigit(rune), rune == dash, rune == underscore, rune == period:
 				tokbuf = append(tokbuf, byte(rune))
 			case rune == colon:
 				result.Repo = string(tokbuf)

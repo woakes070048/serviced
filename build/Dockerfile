@@ -10,8 +10,13 @@
 # # Mount your source in an interactive container for quick testing:
 # docker run -v `pwd`:/go/src/github.com/zenoss/serviced -privileged -lxc-conf=lxc.aa_profile=unconfined -i -t serviced bash
 #
-#
+
+# Please be careful when changing the 'FROM' line below - the packaging code
+# uses the output of 'lsb_release' to determine the version string of the
+# .deb pacakge, and if the base image changes here, then that string will
+# change accordingly.
 FROM ubuntu:trusty
+
 MAINTAINER Zenoss, Inc <dev@zenoss.com>	
 
 RUN	apt-get update -qq
@@ -26,6 +31,15 @@ RUN	apt-get install -y -q wget curl git
 RUN	curl -s https://storage.googleapis.com/golang/go1.3.3.linux-amd64.tar.gz | tar -v -C /usr/local -xz
 ENV	GOPATH  /go
 ENV	PATH $PATH:/go/bin:/usr/local/go/bin
+
+# Install nodejs, npm, gulp, etc
+RUN apt-get install -y -q nodejs=0.10.25~dfsg2-2ubuntu1 npm=1.3.10~dfsg-1
+# create link from nodejs to node
+RUN ln /usr/bin/nodejs /usr/bin/node
+RUN npm install -g gulp@3.8.10 jshint@2.5.11 6to5@2.13.3
+# add a script that allows tasks to be
+# performed as a specific user
+ADD userdo.sh /root/userdo.sh
 
 # build dependencies
 RUN	apt-get install -y -q make gcc libpam0g-dev ruby ruby-dev
