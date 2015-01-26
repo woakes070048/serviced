@@ -13,15 +13,45 @@
 
 package config
 
-import "github.com/control-center/serviced/validation"
+import (
+	"fmt"
+	"path/filepath"
+	"sync"
 
-func (config *ServiceConfigHistory) ValidEntity() error {
+	"github.com/control-center/serviced/validation"
+)
+
+func (record *ServiceConfigHistory) ValidEntity() error {
 	vErr := validation.NewValidationError()
-	vErr.Add(validation.NotEmpty("ID", config.ID))
-	vErr.Add(validation.NotEmpty("TenantID", config.TenantID))
-	vErr.Add(validation.NotEmpty("ServicePath", config.ServicePath))
+	vErr.Add(validation.NotEmpty("ID", record.ID))
+	vErr.Add(validation.NotEmpty("TenantID", record.TenantID))
+	vErr.Add(validation.NotEmpty("ServicePath", record.ServicePath))
+
+	record.validFiles(vErr)
 	if vErr.HasError() {
 		return vErr
 	}
 	return nil
+}
+
+// validFiles ensures all the config files are valid and unique
+func (record *ServiceConfigHistory) validFiles(vErr *validation.ValidationError) {
+	var (
+		byName = make(map[string]sync.Once)
+	)
+
+	for tag, config := range record.ConfigFiles {
+		if tag != config.ID {
+			vErr.Add(fmt.Errorf("mismatch tag (%s) and id (%s)", tag, config.ID))
+		}
+
+		filename := filepath.Clean(config.Filename)
+		if once, ok := byName[filename]; ok {
+			once.Do(func() {
+				vErr.Add(fmt.Errorf("found multiple files at %s", filename))
+			})
+		} else {
+			byName[filename] = sync.Once{}
+		}
+	}
 }

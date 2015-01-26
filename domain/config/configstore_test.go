@@ -15,6 +15,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/control-center/serviced/datastore"
 	"github.com/control-center/serviced/datastore/elastic"
@@ -46,7 +47,7 @@ func (s *S) SetUpTest(c *C) {
 }
 
 func (s *S) TestServiceConfigHistory_CRUD(t *C) {
-	expected, err := NewRecord("svc_test_id", "./a/b/c", "initial revision", make(map[string]servicedefinition.ConfigFile, 0))
+	expected, err := NewRecord("svc_test_id", "./a/b/c", make(map[string]servicedefinition.ConfigFile))
 	t.Assert(err, IsNil)
 
 	actual, err := s.store.Get(s.ctx, expected.ID)
@@ -87,16 +88,21 @@ func (s *S) TestServiceConfigHistory_Commit(t *C) {
 		t.Assert(actual.ServicePath, Equals, expected.ServicePath)
 		t.Assert(actual.CreatedAt.Unix() > 0, Equals, true)
 		t.Assert(actual.CommitMessage, Equals, expected.CommitMessage)
-		t.Assert(actual.ConfigFiles, HasLen, len(expected.ConfigFiles))
-		for name, file := range expected.ConfigFiles {
-			t.Assert(actual.ConfigFiles[name], DeepEquals, file)
-		}
+		t.Assert(actual.ConfigFiles, DeepEquals, expected.ConfigFiles)
 	}
 
 	verify := func(config *ServiceConfigHistory, configs ...ServiceConfigHistory) {
 		var err error
 		err = s.store.Put(s.ctx, config)
 		t.Assert(err, IsNil)
+
+		oconfig := config
+		if count := len(configs); count > 0 {
+			oconfig = &configs[count-1]
+		}
+		actual0, err := s.store.GetOriginalServiceConfig(s.ctx, config.TenantID, config.ServicePath)
+		t.Assert(err, IsNil)
+		equals(*actual0, *oconfig)
 
 		actual1, err := s.store.GetServiceConfig(s.ctx, config.TenantID, config.ServicePath)
 		t.Assert(err, IsNil)
@@ -112,10 +118,10 @@ func (s *S) TestServiceConfigHistory_Commit(t *C) {
 	}
 
 	configfiles := map[string]servicedefinition.ConfigFile{
-		"file1": servicedefinition.ConfigFile{Filename: "file1", Owner: "testuser", Permissions: "0777", Content: "config file1 data"},
-		"file2": servicedefinition.ConfigFile{Filename: "file2", Owner: "testuser", Permissions: "0777", Content: "config file2 data"},
+		"file1": {Filename: "file1", Owner: "testuser", Permissions: "0777", Content: "config file1 data", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		"file2": {Filename: "file2", Owner: "testuser", Permissions: "0777", Content: "config file2 data", CreatedAt: time.Now(), UpdatedAt: time.Now()},
 	}
-	record, err := NewRecord("tenant_test_id1", "./a/b/c", "test message 1", configfiles)
+	record, err := NewRecord("tenant_test_id1", "./a/b/c", configfiles)
 	t.Assert(err, IsNil)
 
 	actual1, err := s.store.GetServiceConfig(s.ctx, record.TenantID, record.ServicePath)
@@ -130,20 +136,20 @@ func (s *S) TestServiceConfigHistory_Commit(t *C) {
 	record, err = s.store.GetServiceConfig(s.ctx, record.TenantID, record.ServicePath)
 	t.Assert(err, IsNil)
 
-	configfiles["file3"] = servicedefinition.ConfigFile{Filename: "file3", Content: "config file3 data"}
-	record1, err := NewRecord("tenant_test_id1", "./a/b/c", "test message 2", configfiles)
+	configfiles["file3"] = servicedefinition.ConfigFile{Filename: "file3", Content: "config file3 data", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	record1, err := NewRecord("tenant_test_id1", "./a/b/c", configfiles)
 	t.Assert(err, IsNil)
 	verify(record1, *record)
 
-	record2, err := NewRecord("tenant_test_id1", "./1/2/3", "test message 3", configfiles)
+	record2, err := NewRecord("tenant_test_id1", "./1/2/3", configfiles)
 	t.Assert(err, IsNil)
 	verify(record2)
 
-	record3, err := NewRecord("tenant_test_id2", "./a/b/c", "test message 4", configfiles)
+	record3, err := NewRecord("tenant_test_id2", "./a/b/c", configfiles)
 	t.Assert(err, IsNil)
 	verify(record3)
 
-	record4, err := NewRecord("tenant_test_id2", "./1/2/3", "test message 5", configfiles)
+	record4, err := NewRecord("tenant_test_id2", "./1/2/3", configfiles)
 	t.Assert(err, IsNil)
 	verify(record4)
 }

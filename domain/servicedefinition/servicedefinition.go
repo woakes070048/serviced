@@ -99,10 +99,30 @@ type Volume struct {
 
 // ConfigFile config file for a service
 type ConfigFile struct {
-	Filename    string // complete path of file
-	Owner       string // owner of file within the container, root:root or 0:0 for root owned file, what you would pass to chown
-	Permissions string // permission of file, eg 0664, what you would pass to chmod
-	Content     string // content of config file
+	ID          string    // unique id of the file
+	Filename    string    // complete path of file
+	Owner       string    // owner of file within the container, root:root or 0:0 for root owned file, what you would pass to chown
+	Permissions string    // permission of file, eg 0664, what you would pass to chmod
+	Content     string    // content of config file
+	CreatedAt   time.Time // the time which the file was created
+	UpdatedAt   time.Time // the time which the file was last updated
+	RefID       string    // the id of the history record from where this file was last updated
+}
+
+func (c ConfigFile) Equals(b ConfigFile) bool {
+	if c.Filename != b.Filename {
+		return false
+	}
+	if c.Owner != b.Owner {
+		return false
+	}
+	if c.Permissions != b.Permissions {
+		return false
+	}
+	if c.Content != b.Content {
+		return false
+	}
+	return true
 }
 
 //AddressResourceConfig defines an external facing port for a service definition

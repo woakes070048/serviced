@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -23,8 +22,6 @@ import (
 	"github.com/control-center/serviced/domain/host"
 
 	"github.com/control-center/serviced/domain/service"
-	"github.com/control-center/serviced/domain/serviceconfigfile"
-	"github.com/control-center/serviced/domain/servicedefinition"
 	"github.com/control-center/serviced/domain/servicestate"
 
 	"github.com/control-center/serviced/commons/docker"
@@ -52,40 +49,19 @@ func (f *Facade) AddService(ctx datastore.Context, svc service.Service) error {
 		return err
 	}
 
+	// set the configuration
+	if err := f.AddConfig(ctx, &svc); err != nil {
+		glog.Errorf("Could not add configuration to service %s: %s", svc.Name, err)
+		return err
+	}
+
 	// Strip the database version; we already know this is a create
 	svc.DatabaseVersion = 0
 
-	// Save a copy for checking configs later
-	svcCopy := svc
-
-	err = store.Put(ctx, &svc)
-	if err != nil {
-		glog.V(2).Infof("Facade.AddService: %+v", err)
+	if err := store.Put(ctx, &svc); err != nil {
+		glog.Errorf("Could not add service %s: %s", svc.Name, err)
 		return err
 	}
-	glog.V(2).Infof("Facade.AddService: id %+v", svc.ID)
-
-	// Compare the incoming config files to see if there are modifications from
-	// the original. If there are, we need to perform an update to add those
-	// modifications to the service.
-	if svcCopy.OriginalConfigs != nil && !reflect.DeepEqual(svcCopy.OriginalConfigs, svcCopy.ConfigFiles) {
-		// Get the current service in order to get the database version. We
-		// don't save this because it won't have any of the updated config
-		// files, among other things.
-		cursvc, err := store.Get(ctx, svc.ID)
-		if err != nil {
-			glog.V(2).Infof("Facade.AddService: %+v", err)
-			return err
-		}
-		svcCopy.DatabaseVersion = cursvc.DatabaseVersion
-
-		for key, _ := range svcCopy.OriginalConfigs {
-			glog.V(2).Infof("Facade.AddService: calling updateService for %s due to OriginalConfigs of %+v", svc.Name, key)
-		}
-		return f.updateService(ctx, &svcCopy)
-	}
-
-	glog.V(2).Infof("Facade.AddService: calling zk.updateService for %s %d ConfigFiles", svc.Name, len(svc.ConfigFiles))
 	return zkAPI(f).UpdateService(&svc)
 }
 
@@ -822,25 +798,6 @@ func (f *Facade) getServices(ctx datastore.Context) ([]service.Service, error) {
 	return results, nil
 }
 
-//
-func (f *Facade) getTenantIDAndPath(ctx datastore.Context, svc service.Service) (string, string, error) {
-	gs := func(id string) (service.Service, error) {
-		return f.getService(ctx, id)
-	}
-
-	tenantID, err := f.GetTenantID(ctx, svc.ID)
-	if err != nil {
-		return "", "", err
-	}
-
-	path, err := svc.GetPath(gs)
-	if err != nil {
-		return "", "", err
-	}
-
-	return tenantID, path, err
-}
-
 // traverse all the services (including the children of the provided service)
 func (f *Facade) walkServices(ctx datastore.Context, serviceID string, traverse bool, visitFn service.Visit) error {
 	store := f.serviceStore
@@ -970,9 +927,10 @@ func (f *Facade) fillOutService(ctx datastore.Context, svc *service.Service) err
 	if err := f.fillServiceAddr(ctx, svc); err != nil {
 		return err
 	}
-	if err := f.fillServiceConfigs(ctx, svc); err != nil {
+	if err := f.GetConfig(ctx, svc); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -980,35 +938,6 @@ func (f *Facade) fillOutServices(ctx datastore.Context, svcs []service.Service) 
 	for i := range svcs {
 		if err := f.fillOutService(ctx, &svcs[i]); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func (f *Facade) fillServiceConfigs(ctx datastore.Context, svc *service.Service) error {
-	glog.V(3).Infof("fillServiceConfigs for %s", svc.ID)
-	tenantID, servicePath, err := f.getTenantIDAndPath(ctx, *svc)
-	if err != nil {
-		return err
-	}
-	glog.V(3).Infof("service %v; tenantid=%s; path=%s", svc.ID, tenantID, servicePath)
-
-	configStore := serviceconfigfile.NewStore()
-	existingConfs, err := configStore.GetConfigFiles(ctx, tenantID, servicePath)
-	if err != nil {
-		return err
-	}
-
-	//found confs are the modified confs for f service
-	foundConfs := make(map[string]*servicedefinition.ConfigFile)
-	for _, svcConfig := range existingConfs {
-		foundConfs[svcConfig.ConfFile.Filename] = &svcConfig.ConfFile
-	}
-
-	//replace with stored service config only if it is an existing config
-	for name, conf := range foundConfs {
-		if _, found := svc.ConfigFiles[name]; found {
-			svc.ConfigFiles[name] = *conf
 		}
 	}
 	return nil
@@ -1065,10 +994,10 @@ func (f *Facade) updateService(ctx datastore.Context, svc *service.Service) erro
 	//add assignment info to service so it is availble in zk
 	f.fillServiceAddr(ctx, svc)
 
-	svcStore := f.serviceStore
+	svcstore := f.serviceStore
 
 	// verify the service with name and parent does not collide with another existing service
-	if s, err := svcStore.FindChildService(ctx, svc.ParentServiceID, svc.Name); err != nil {
+	if s, err := svcstore.FindChildService(ctx, svc.ParentServiceID, svc.Name); err != nil {
 		glog.Errorf("Could not verify service path for %s: %s", svc.Name, err)
 		return err
 	} else if s != nil {
@@ -1079,78 +1008,30 @@ func (f *Facade) updateService(ctx datastore.Context, svc *service.Service) erro
 		}
 	}
 
-	oldSvc, err := svcStore.Get(ctx, svc.ID)
+	oldService, err := svcstore.Get(ctx, svc.ID)
 	if err != nil {
+		glog.Errorf("Could not look up current information for service %s (%s): %s", svc.Name, svc.ID, err)
 		return err
 	}
 
-	//Deal with Service Config Files
-	//For now always make sure originalConfigs stay the same, essentially they are immutable
-	svc.OriginalConfigs = oldSvc.OriginalConfigs
-
-	//check if config files haven't changed
-	if !reflect.DeepEqual(oldSvc.OriginalConfigs, svc.ConfigFiles) {
-		//lets validate Service before doing more work....
-		if err := svc.ValidEntity(); err != nil {
-			return err
-		}
-
-		tenantID, servicePath, err := f.getTenantIDAndPath(ctx, *svc)
-		if err != nil {
-			return err
-		}
-
-		newConfs := make(map[string]*serviceconfigfile.SvcConfigFile)
-		//config files are different, for each one that is different validate and add to newConfs
-		for key, oldConf := range oldSvc.OriginalConfigs {
-			if conf, found := svc.ConfigFiles[key]; found {
-				if !reflect.DeepEqual(oldConf, conf) {
-					newConf, err := serviceconfigfile.New(tenantID, servicePath, conf)
-					if err != nil {
-						return err
-					}
-					newConfs[key] = newConf
-				}
-			}
-		}
-
-		//Get current stored conf files and replace as needed
-		configStore := serviceconfigfile.NewStore()
-		existingConfs, err := configStore.GetConfigFiles(ctx, tenantID, servicePath)
-		if err != nil {
-			return err
-		}
-		foundConfs := make(map[string]*serviceconfigfile.SvcConfigFile)
-		for _, svcConfig := range existingConfs {
-			foundConfs[svcConfig.ConfFile.Filename] = svcConfig
-		}
-		//add or replace stored service config
-		for _, newConf := range newConfs {
-			if existing, found := foundConfs[newConf.ConfFile.Filename]; found {
-				newConf.ID = existing.ID
-				//delete it from stored confs, left overs will be deleted from DB
-				delete(foundConfs, newConf.ConfFile.Filename)
-			}
-			configStore.Put(ctx, serviceconfigfile.Key(newConf.ID), newConf)
-		}
-		//remove leftover non-updated stored confs, conf was probably reverted to original or no longer exists
-		for _, confToDelete := range foundConfs {
-			configStore.Delete(ctx, serviceconfigfile.Key(confToDelete.ID))
-		}
+	// check and update the service configuration
+	if err := f.UpdateConfig(ctx, svc); err != nil {
+		glog.Errorf("Could not update service config for %s (%s): %s", svc.Name, svc.ID, err)
+		return err
 	}
 
 	svc.UpdatedAt = time.Now()
-	if err := svcStore.Put(ctx, svc); err != nil {
+	if err := svcstore.Put(ctx, svc); err != nil {
 		return err
 	}
 
 	// Remove the service from zookeeper if the pool ID has changed
-	if oldSvc.PoolID != svc.PoolID {
-		if err := zkAPI(f).RemoveService(oldSvc); err != nil {
+	if oldService.PoolID != svc.PoolID {
+		if err := zkAPI(f).RemoveService(oldService); err != nil {
 			// Synchronizer will eventually clean this service up
-			glog.Warningf("ZK: Could not delete service %s (%s) from pool %s: %s", svc.Name, svc.ID, oldSvc.PoolID, err)
-			oldSvc.DesiredState = int(service.SVCStop)
-			zkAPI(f).UpdateService(oldSvc)
+			glog.Warningf("ZK: Could not delete service %s (%s) from pool %s: %s", svc.Name, svc.ID, oldService.PoolID, err)
+			oldService.DesiredState = int(service.SVCStop)
+			zkAPI(f).UpdateService(oldService)
 		}
 	}
 

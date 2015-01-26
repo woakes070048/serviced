@@ -20,6 +20,7 @@ import (
 	. "gopkg.in/check.v1"
 
 	"testing"
+	"time"
 )
 
 // This plumbs gocheck into testing
@@ -47,7 +48,7 @@ func (s *S) SetUpTest(c *C) {
 }
 
 func (s *S) Test_ConfigFileCRUD(t *C) {
-	configFile, err := New("tenant_id", "/testpath", servicedefinition.ConfigFile{Content: "Test content", Filename: "testname"})
+	configFile, err := New("tenant_id", "/testpath", servicedefinition.ConfigFile{Content: "Test content", Filename: "testname", CreatedAt: time.Now(), UpdatedAt: time.Now()})
 	t.Assert(err, IsNil)
 	configFile2 := SvcConfigFile{}
 
@@ -90,7 +91,7 @@ func (s *S) Test_GetConfigFiles(t *C) {
 	t.Assert(err, IsNil)
 	t.Assert(0, Equals, len(configFiles))
 
-	configFile, err := New(tenant, path, servicedefinition.ConfigFile{Content: "Test content", Filename: "testname"})
+	configFile, err := New(tenant, path, servicedefinition.ConfigFile{Content: "Test content", Filename: "testname", CreatedAt: time.Now(), UpdatedAt: time.Now()})
 	t.Assert(err, IsNil)
 	err = s.ps.Put(s.ctx, Key(configFile.ID), configFile)
 	t.Assert(err, IsNil)

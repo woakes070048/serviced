@@ -62,8 +62,8 @@ type Service struct {
 	Startup           string
 	Description       string
 	Tags              []string
-	OriginalConfigs   map[string]servicedefinition.ConfigFile
-	ConfigFiles       map[string]servicedefinition.ConfigFile
+	OriginalConfigs   map[string]servicedefinition.ConfigFile // Deprecated
+	ConfigFiles       map[string]servicedefinition.ConfigFile // Deprecated
 	Instances         int
 	InstanceLimits    domain.MinMax
 	ChangeOptions     []string

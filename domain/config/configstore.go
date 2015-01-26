@@ -50,6 +50,35 @@ func (s *Store) Delete(ctx datastore.Context, id string) error {
 	return s.ds.Delete(ctx, Key(id))
 }
 
+// GetOriginalServiceConfig returns the oldest config for a service
+func (s *Store) GetOriginalServiceConfig(ctx datastore.Context, tenantID string, servicePath string) (*ServiceConfigHistory, error) {
+	if tenantID = strings.TrimSpace(tenantID); tenantID == "" {
+		return nil, errors.New("empty TenantID not allowed")
+	} else if servicePath = strings.TrimSpace(servicePath); servicePath == "" {
+		return nil, errors.New("empty ServicePath not allowed")
+	}
+
+	search := search.Search("controlplane").Type(kind).Size("1").Sort(
+		search.Sort("CreatedAt").Asc(),
+	).Filter(
+		"and",
+		search.Filter().Terms("TenantID", tenantID),
+		search.Filter().Terms("ServicePath", servicePath),
+	)
+
+	q := datastore.NewQuery(ctx)
+	results, err := q.Execute(search)
+	if err != nil {
+		return nil, err
+	}
+
+	if configs, err := convert(results); err != nil || len(configs) == 0 {
+		return nil, err
+	} else {
+		return &configs[0], nil
+	}
+}
+
 // GetServiceConfig returns the latest config for a service
 func (s *Store) GetServiceConfig(ctx datastore.Context, tenantID string, servicePath string) (*ServiceConfigHistory, error) {
 	if tenantID = strings.TrimSpace(tenantID); tenantID == "" {
