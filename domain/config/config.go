@@ -47,10 +47,11 @@ func (s SortFiles) Sort() {
 	sort.Sort(s)
 }
 
-func validate(filemap map[string]servicedefinition.ConfigFile) (files []servicedefinition.ConfigFile, err error) {
+func validate(filemap map[string]servicedefinition.ConfigFile) ([]servicedefinition.ConfigFile, error) {
 	var (
 		byID   = make(map[string]struct{})
 		byName = make(map[string]struct{})
+		files  = make([]servicedefinition.ConfigFile, 0)
 	)
 
 	for tag, file := range filemap {
@@ -68,6 +69,7 @@ func validate(filemap map[string]servicedefinition.ConfigFile) (files []serviced
 				return nil, fmt.Errorf("filename cannot be empty %s (%s)", file.ID, tag)
 			}
 		}
+		files = append(files, file)
 	}
 
 	return files, nil
