@@ -131,6 +131,12 @@ func (d *daemon) getEsClusterName(Type string) string {
 }
 
 func (d *daemon) startISVCS() {
+	ip, _, _ := net.SplitHostPort(d.servicedEndpoint)
+
+	// Add ceph monitoring env
+	isvcs.AddEnv("ceph-mon:MON_NAME=" + d.hostID)
+	isvcs.AddEnv("ceph-mon:MON_IP=" + ip)
+
 	isvcs.Init()
 	isvcs.Mgr.SetVolumesDir(path.Join(options.VarPath, "isvcs"))
 	if err := isvcs.Mgr.SetConfigurationOption("elasticsearch-serviced", "cluster", d.getEsClusterName("elasticsearch-serviced")); err != nil {

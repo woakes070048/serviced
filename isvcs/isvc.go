@@ -27,7 +27,7 @@ var Mgr *Manager
 
 const (
 	IMAGE_REPO = "zenoss/serviced-isvcs"
-	IMAGE_TAG  = "v26"
+	IMAGE_TAG  = "v27"
 )
 
 func Init() {
@@ -52,6 +52,9 @@ func Init() {
 		glog.Fatalf("%s", err)
 	}
 	if err := Mgr.Register(dockerRegistry); err != nil {
+		glog.Fatalf("%s", err)
+	}
+	if err := Mgr.Register(cephmon); err != nil {
 		glog.Fatalf("%s", err)
 	}
 }

@@ -176,11 +176,13 @@ func (m *Manager) wipe() error {
 func (m *Manager) loadImages() error {
 	loadedImages := make(map[string]bool)
 	for _, c := range m.services {
-		glog.V(2).Infof("Checking isvcs container %+v", c)
+		glog.V(0).Infof("Checking isvcs container %+v", c)
 		if exists, err := m.imageExists(c.Repo, c.Tag); err != nil {
+			glog.Errorf("Error looking up image for %s (%s:%s): %s", c.Name, c.Repo, c.Tag, err)
 			return err
 		} else {
 			if exists {
+				glog.Infof("Found image for %s (%s:%s)", c.Name, c.Repo, c.Tag)
 				continue
 			}
 			localTar := path.Join(m.imagesDir, c.Repo, c.Tag+".tar.gz")
