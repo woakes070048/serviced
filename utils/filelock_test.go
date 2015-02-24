@@ -54,8 +54,9 @@ func TestFileLock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unable to lock %+v: %s", filelock, err)
 		}
-		defer fp.Close()
+		defer os.Remove(filelock)
 		fp.WriteString(fmt.Sprintf("%s:%d\n", hostid, id))
+		fp.Close()
 		events <- "locked"
 		duration := 5 * time.Second
 		glog.V(0).Infof("%s:%d locked    %s - sleeping %s", hostid, id, lockdir, duration)

@@ -22,12 +22,38 @@ import (
 
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
 // LockFile opens and locks the file at the given path - it will block and wait for unlock
 func LockFile(filelockpath string) (*os.File, error) {
+
+WAIT_FOR_LOCK:
+	for {
+		glog.V(2).Infof("locking file: %s", filelockpath)
+		fp, err := os.OpenFile(filelockpath, syscall.O_RDWR|syscall.O_CREAT|syscall.O_EXCL, 0600)
+		if err != nil {
+			if !strings.Contains(err.Error(), syscall.EEXIST.Error()) {
+				return nil, err
+			}
+		} else {
+			glog.V(2).Infof("locked file: %s", filelockpath)
+			return fp, nil
+		}
+
+		glog.Infof("waiting to lock file: %s", filelockpath)
+		select {
+		case <-time.After(1 * time.Second):
+			continue WAIT_FOR_LOCK
+		}
+	}
+
+	return nil, fmt.Errorf("timed out waiting to lock file %s", filelockpath)
+
+	// other failed attempts to lock file using fcntl/flock/...
 	fp, err := os.OpenFile(filelockpath, syscall.O_RDWR|syscall.O_CREAT, 0600)
 	if err != nil {
 		return nil, err
@@ -63,7 +89,6 @@ func LockFile(filelockpath string) (*os.File, error) {
 		if err := syscall.FcntlFlock(fp.Fd(), syscall.F_SETLKW /* F_GETLK, F_SETLK, F_SETLKW */, &ft); err != nil {
 			return nil, err
 		}
-
 	} else {
 		// This type matches C's "struct flock" defined in /usr/include/x86_64-linux-gnu/bits/fcntl.h
 		// TODO: move this into the standard syscall package.

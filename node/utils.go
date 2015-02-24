@@ -20,6 +20,7 @@ package node
 
 import (
 	"github.com/control-center/serviced/coordinator/client"
+	"github.com/control-center/serviced/utils"
 	"github.com/zenoss/glog"
 
 	"fmt"
@@ -308,11 +309,25 @@ func getInternalImageIDs(userSpec, imageSpec string) (uid, gid int, err error) {
 // with the registry.
 func createVolumeDir(conn client.Connection, hostPath, containerSpec, imageSpec, userSpec, permissionSpec string) error {
 
-	// use zookeeper lock of basename of hostPath (volume name)
-	zkVolumeInitLock := path.Join("/locks/volumeinit", filepath.Base(hostPath))
-	lock := conn.NewLock(zkVolumeInitLock)
-	lock.Lock()
-	defer lock.Unlock()
+	if true {
+		// use hostpath based filelock
+		lockfile := ".serviced.initializing.lck"
+		lockfileHostPath := path.Join(hostPath, lockfile)
+		if lck, err := utils.LockFile(lockfileHostPath); err != nil {
+			glog.Errorf("DFS volume init unable to lock %s", lockfileHostPath)
+			return err
+		} else {
+			lck.Close()
+			defer os.Remove(lockfileHostPath)
+			glog.V(0).Infof("DFS volume init locked %s", lockfileHostPath)
+		}
+	} else {
+		// use zookeeper lock of basename of hostPath (volume name)
+		zkVolumeInitLock := path.Join("/locks/volumeinit", filepath.Base(hostPath))
+		lock := conn.NewLock(zkVolumeInitLock)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 
 	// return if service volume has been initialized
 	dotfileCompatibility := path.Join(hostPath, ".serviced.initialized") // for compatibility with previous versions of serviced
